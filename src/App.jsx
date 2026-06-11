@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
+import { SVGTree, findRoots, getDisplayClan } from './SVGTree'
+import { NetworkView } from './NetworkView'
 
 // ── DB helpers ──
 const db = {
@@ -28,64 +30,19 @@ const db = {
 
   async updatePerson(id, fields) {
     await supabase.from('persons').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', id)
+  },
+
+  async updateFamily(id, fields) {
+    await supabase.from('families').update(fields).eq('id', id)
   }
 }
 
-function makeId(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now().toString(36)
-}
-
-function PersonToRow(p, familyId) {
-  return {
-    id: p.id,
-    family_id: familyId,
-    name: p.name || '',
-    clan: p.clan || '',
-    gender: p.gender || 'M',
-    status: p.status || 'alive',
-    generation: p.generation || 0,
-    parent_id: p.parentId || null,
-    spouse_id: p.spouseId || null,
-    location: p.location || '',
-    native_place: p.nativePlace || '',
-    gotra: p.gotra || '',
-    languages: p.languages || [],
-    occupation: p.occupation || { role: '', company: '' },
-    education: p.education || [],
-    profiles: p.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
-    phone: p.phone || '',
-    address: p.address || '',
-    role: p.role || '',
-    notes: p.notes || '',
-    verified: p.verified || false,
-    sort_order: p.sortOrder || 0,
-  }
-}
-
-function RowToPerson(r) {
-  return {
-    id: r.id,
-    name: r.name,
-    clan: r.clan,
-    gender: r.gender,
-    status: r.status,
-    generation: r.generation,
-    parentId: r.parent_id,
-    spouseId: r.spouse_id,
-    location: r.location,
-    nativePlace: r.native_place,
-    gotra: r.gotra,
-    languages: r.languages || [],
-    occupation: r.occupation || { role: '', company: '' },
-    education: r.education || [],
-    profiles: r.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
-    phone: r.phone,
-    address: r.address,
-    role: r.role,
-    notes: r.notes,
-    verified: r.verified,
-    sortOrder: r.sort_order,
-  }
+const LABELS = {
+  telugu:  { father: 'తండ్రి',  mother: 'తల్లి',   husband: 'భర్త',     wife: 'భార్య',    son: 'కొడుకు',  daughter: 'కూతురు',  children: 'పిల్లలు',      gotra: 'గోత్రం',     languages: 'భాషలు',     addFamily: 'కుటుంబం జోడించు' },
+  hindi:   { father: 'पिता',    mother: 'माता',    husband: 'पति',      wife: 'पत्नी',    son: 'बेटा',    daughter: 'बेटी',    children: 'बच्चे',        gotra: 'गोत्र',      languages: 'भाषाएं',    addFamily: 'परिवार जोड़ें' },
+  tamil:   { father: 'அப்பா',  mother: 'அம்மா',  husband: 'கணவர்',   wife: 'மனைவி',  son: 'மகன்',   daughter: 'மகள்',   children: 'குழந்தைகள்', gotra: 'கோத்திரம்', languages: 'மொழிகள்',  addFamily: 'குடும்பம் சேர்' },
+  kannada: { father: 'ತಂದೆ',   mother: 'ತಾಯಿ',   husband: 'ಗಂಡ',     wife: 'ಹೆಂಡತಿ', son: 'ಮಗ',    daughter: 'ಮಗಳು',  children: 'ಮಕ್ಕಳು',      gotra: 'ಗೋತ್ರ',     languages: 'ಭಾಷೆಗಳು',  addFamily: 'ಕುಟುಂಬ ಸೇರಿಸಿ' },
+  english: { father: 'Father', mother: 'Mother', husband: 'Husband', wife: 'Wife',   son: 'Son',    daughter: 'Daughter', children: 'Children',     gotra: 'Gotra',     languages: 'Languages', addFamily: 'Add Family' },
 }
 
 // ════════════════════════════════════
@@ -101,13 +58,13 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(new Set())
   const [tab, setTab] = useState('tree')
+  const [view, setView] = useState('chart')
 
   // Boot
   useEffect(() => {
     db.getFamilies().then(f => { setFamilies(f); setScreen('home') })
   }, [])
 
-  // Open family
   const openFamily = async (f) => {
     const rows = await db.getPersons(f.id)
     setPersons(rows.map(RowToPerson))
@@ -116,7 +73,6 @@ export default function App() {
     setScreen('family')
   }
 
-  // Create family
   const createFamily = async (name) => {
     const id = makeId(name)
     await db.createFamily(id, name.trim())
@@ -125,22 +81,19 @@ export default function App() {
     openFamily(f)
   }
 
-  // Refresh persons from DB
   const refresh = useCallback(async () => {
     if (!fam) return
     const rows = await db.getPersons(fam.id)
     setPersons(rows.map(RowToPerson))
   }, [fam])
 
-  // Person helpers
   const getKids = (id) => persons.filter(p => p.parentId === id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
   const clans = [...new Set(persons.map(p => p.clan).filter(Boolean))].sort()
   const selected = sel ? persons.find(p => p.id === sel) : null
   const spouse = selected?.spouseId ? persons.find(p => p.id === selected.spouseId) : null
   const parent = selected?.parentId ? persons.find(p => p.id === selected.parentId) : null
-  const roots = persons.filter(p => !p.parentId || !persons.find(x => x.id === p.parentId)).sort((a, b) => a.generation - b.generation)
+  const rootIds = findRoots(persons)
 
-  // Save (add or edit)
   const savePerson = async (form) => {
     if (mode?.type === 'add') {
       const id = makeId(form.name)
@@ -157,7 +110,6 @@ export default function App() {
         form.parentId = target.parentId || null
         await db.upsertPerson(PersonToRow({ ...form, id }, fam.id))
         await db.updatePerson(targetId, { parent_id: id })
-        // Shift generations if needed
         const minGen = Math.min(...persons.map(p => p.generation), form.generation)
         if (minGen < 0) {
           for (const p of persons) {
@@ -166,6 +118,12 @@ export default function App() {
           await db.updatePerson(id, { generation: form.generation + Math.abs(minGen) })
         }
       } else {
+        const clickTarget = persons.find(p => p.id === targetId)
+        if (clickTarget) {
+          const clickSpouse = clickTarget.spouseId ? persons.find(p => p.id === clickTarget.spouseId) : null
+          const bloodFather = clickTarget.gender === 'M' ? clickTarget : (clickSpouse?.gender === 'M' ? clickSpouse : clickTarget)
+          form.parentId = bloodFather.id
+        }
         const sibs = persons.filter(p => p.parentId === form.parentId)
         form.sortOrder = sibs.length
         await db.upsertPerson(PersonToRow({ ...form, id }, fam.id))
@@ -183,9 +141,7 @@ export default function App() {
   const deletePerson = async (id) => {
     if (getKids(id).length > 0) return alert('Move or delete children first')
     const p = persons.find(x => x.id === id)
-    if (p?.spouseId) {
-      await db.updatePerson(p.spouseId, { spouse_id: null })
-    }
+    if (p?.spouseId) await db.updatePerson(p.spouseId, { spouse_id: null })
     await db.deletePerson(id)
     setSel(null)
     await refresh()
@@ -210,12 +166,8 @@ export default function App() {
     await refresh()
   }
 
-  // ── HOME SCREEN ──
   if (screen === 'loading') return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#999' }}>Loading…</div>
-
-  if (screen === 'home') {
-    return <HomeScreen families={families} onCreate={createFamily} onSelect={openFamily} />
-  }
+  if (screen === 'home') return <HomeScreen families={families} onCreate={createFamily} onSelect={openFamily} />
 
   // ── FAMILY SCREEN ──
   const kids = selected ? getKids(selected.id) : []
@@ -228,46 +180,15 @@ export default function App() {
     return [p.name, p.clan, p.location, p.occupation?.company, p.notes].some(f => (f || '').toLowerCase().includes(q))
   })
 
-  const TreeNode = ({ id, depth = 0 }) => {
-    const p = persons.find(x => x.id === id)
-    if (!p) return null
-    const ch = getKids(id)
-    const open = expanded.has(id)
-    const dead = p.status === 'deceased'
-    const sibs = persons.filter(x => x.parentId === p.parentId).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
-    const si = sibs.findIndex(x => x.id === id)
+  const REL = LABELS[fam?.language || 'english'] || LABELS.english
+  const getChildLabel = (child) => child.gender === 'M' ? REL.son : REL.daughter
+  const getSpouseLabel = (person) => person.gender === 'M' ? REL.wife : REL.husband
+  const getParentLabel = (par) => par.gender === 'M' ? REL.father : REL.mother
 
-    return (
-      <div style={{ marginLeft: depth > 0 ? 20 : 0 }}>
-        <div className={`tree-node ${sel === id ? 'selected' : ''} ${dead ? 'deceased' : ''}`}
-          style={{ borderLeft: `3px solid ${clans.indexOf(p.clan) >= 0 ? ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D'][clans.indexOf(p.clan) % 5] : '#ddd'}` }}
-          onClick={() => setSel(id)}>
-          {ch.length > 0 && (
-            <span onClick={e => { e.stopPropagation(); setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n }) }}
-              style={{ fontSize: 10, cursor: 'pointer', color: '#ccc', width: 14, textAlign: 'center', userSelect: 'none' }}>
-              {open ? '▼' : '▶'}
-            </span>
-          )}
-          {ch.length === 0 && <span style={{ width: 14 }} />}
-          <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-            <span onClick={() => si > 0 && moveSib(id, -1)} style={{ fontSize: 7, cursor: si > 0 ? 'pointer' : 'default', color: si > 0 ? '#bbb' : '#eee', userSelect: 'none' }}>▲</span>
-            <span onClick={() => si < sibs.length - 1 && moveSib(id, 1)} style={{ fontSize: 7, cursor: si < sibs.length - 1 ? 'pointer' : 'default', color: si < sibs.length - 1 ? '#bbb' : '#eee', userSelect: 'none' }}>▼</span>
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 14, fontWeight: 500, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none' }}>
-              {dead ? '✝ ' : ''}{p.name}
-            </span>
-            {!p.verified && <span className="badge-verify">?</span>}
-          </div>
-          <span style={{ fontSize: 10, color: '#ccc' }}>{p.location || ''}</span>
-        </div>
-        {open && ch.map(c => <TreeNode key={c.id} id={c.id} depth={depth + 1} />)}
-      </div>
-    )
-  }
+  const addRootAction = persons.length > 0 ? () => setMode({ type: 'add', dir: 'child', parentId: null }) : undefined
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div className="header">
         <button className="header-back" onClick={async () => { setScreen('home'); setFamilies(await db.getFamilies()) }}>←</button>
         <div style={{ flex: 1 }}>
@@ -275,6 +196,21 @@ export default function App() {
           <div className="header-sub">{persons.length} members</div>
         </div>
         <div className="header-tabs">
+          <select
+            value={fam.language || 'english'}
+            onChange={async e => {
+              const lang = e.target.value
+              setFam(f => ({ ...f, language: lang }))
+              await db.updateFamily(fam.id, { language: lang })
+            }}
+            style={{ background: '#333', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 5, padding: '2px 4px', fontSize: 10, cursor: 'pointer', marginRight: 4 }}
+          >
+            <option value="telugu">తెలుగు</option>
+            <option value="hindi">हिंदी</option>
+            <option value="tamil">தமிழ்</option>
+            <option value="kannada">ಕನ್ನಡ</option>
+            <option value="english">English</option>
+          </select>
           {[['tree', 'Tree'], ['export', '↓']].map(([t, l]) => (
             <button key={t} className={`header-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{l}</button>
           ))}
@@ -282,47 +218,67 @@ export default function App() {
       </div>
 
       {tab === 'tree' && (
-        <div className="split">
-          <div className="split-left">
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 8 }} />
+        <div className="split" style={{ flex: 1, minHeight: 0 }}>
+          {/* Left: chart or network */}
+          <div className="split-left" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, flex: 1, padding: '7px 10px' }} />
+              {!search && persons.length > 0 && (
+                <>
+                  <button onClick={() => setView('chart')} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, background: view === 'chart' ? '#1a1a1a' : '#f0f0f0', color: view === 'chart' ? '#fff' : '#999', border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Chart</button>
+                  <button onClick={() => setView('network')} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, background: view === 'network' ? '#1a1a1a' : '#f0f0f0', color: view === 'network' ? '#fff' : '#999', border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Network</button>
+                </>
+              )}
+            </div>
 
-            {persons.length === 0 && (
-              <div className="empty">
+            {persons.length === 0 && !search ? (
+              <div className="empty" style={{ flex: 1 }}>
                 <div className="empty-icon">🌱</div>
                 <div className="empty-title">Start your tree</div>
                 <div className="empty-sub">Add the first person — yourself or the oldest ancestor you know</div>
-                <button className="btn btn-dark" onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}>
-                  + Add first person
-                </button>
+                <button className="btn btn-dark" onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}>+ Add first person</button>
               </div>
-            )}
-
-            {search
-              ? filtered.map(p => (
-                <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
-                  onClick={() => { setSel(p.id); setSearch('') }}>
-                  <span style={{ width: 14 }} />
-                  <span style={{ fontSize: 14, fontWeight: 500 }}>{p.status === 'deceased' ? '✝ ' : ''}{p.name}</span>
-                  <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.clan}</span>
-                </div>
-              ))
-              : roots.map(r => <TreeNode key={r.id} id={r.id} />)
-            }
-
-            {persons.length > 0 && (
-              <button onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}
-                style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, border: '2px dashed #e0e0e0', background: 'transparent', cursor: 'pointer', fontSize: 12, color: '#bbb', width: '100%' }}>
-                + Add another root person
-              </button>
+            ) : search ? (
+              <div style={{ overflowY: 'auto', flex: 1, padding: '4px 12px 12px' }}>
+                {filtered.map(p => (
+                  <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
+                    onClick={() => { setSel(p.id); setSearch('') }}>
+                    <span style={{ width: 14 }} />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                      {(p.status === 'deceased' ? '✝ ' : '') + p.name}{p.clan ? ` (${p.clan})` : ''}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.location || ''}</span>
+                  </div>
+                ))}
+              </div>
+            ) : view === 'chart' ? (
+              <SVGTree
+                persons={persons}
+                sel={sel}
+                setSel={id => { setSel(id); setSearch('') }}
+                clans={clans}
+                rootIds={rootIds}
+                onAddRoot={addRootAction}
+              />
+            ) : (
+              <NetworkView
+                persons={persons}
+                sel={sel}
+                setSel={id => { setSel(id); setSearch('') }}
+                clans={clans}
+                onAddRoot={addRootAction}
+              />
             )}
           </div>
 
+          {/* Right: detail / form */}
           <div className="split-right">
             {mode
               ? <PersonForm mode={mode} persons={persons} fam={fam} onSave={savePerson} onCancel={() => setMode(null)} />
-              : <DetailPanel person={selected} spouse={spouse} parent={parent} allKids={allKids}
+              : <DetailPanel person={selected} spouse={spouse} parent={parent} allKids={allKids} persons={persons}
+                  REL={REL} getChildLabel={getChildLabel} getSpouseLabel={getSpouseLabel} getParentLabel={getParentLabel}
                   onSelect={setSel} onEdit={() => setMode({ type: 'edit', id: selected.id })}
-                  onAdd={(dir) => setMode({ type: 'add', dir, parentId: selected?.id })}
+                  onAdd={(dir, gender) => setMode({ type: 'add', dir, parentId: selected?.id, gender })}
                   onDelete={() => deletePerson(selected.id)}
                   onVerify={() => toggleVerified(selected.id)}
                   setExpanded={setExpanded} />
@@ -336,8 +292,7 @@ export default function App() {
           <h2 style={{ fontSize: 20, marginBottom: 12 }}>Export & Backup</h2>
           <button className="btn btn-dark btn-full" style={{ marginBottom: 12 }}
             onClick={() => {
-              const data = { family: fam, persons: persons }
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+              const blob = new Blob([JSON.stringify({ family: fam, persons }, null, 2)], { type: 'application/json' })
               const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
               a.download = `${fam.name.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.json`; a.click()
             }}>
@@ -363,14 +318,12 @@ export default function App() {
 // ── HOME SCREEN ──
 function HomeScreen({ families, onCreate, onSelect }) {
   const [newName, setNewName] = useState('')
-
   return (
     <div className="home">
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
         <div className="home-title">Kula Vruksham</div>
         <div className="home-sub">Your family, mapped.</div>
       </div>
-
       <div className="card" style={{ cursor: 'default', border: '2px dashed #e0e0e0', padding: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Start a new family tree</div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -380,19 +333,15 @@ function HomeScreen({ families, onCreate, onSelect }) {
           <button className="btn btn-dark" onClick={() => newName.trim() && onCreate(newName)}>Create</button>
         </div>
       </div>
-
       {families.length > 0 && <div style={{ fontSize: 12, color: '#bbb', marginTop: 24, marginBottom: 8, fontWeight: 500 }}>EXISTING FAMILIES</div>}
       {families.map(f => (
         <div key={f.id} className="card card-clickable" onClick={() => onSelect(f)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>{f.name}</div>
-            </div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{f.name}</div>
             <div style={{ fontSize: 22, color: '#ddd' }}>→</div>
           </div>
         </div>
       ))}
-
       <div style={{ textAlign: 'center', marginTop: 40, fontSize: 11, color: '#ddd' }}>
         Anyone with this URL can create a family or contribute
       </div>
@@ -401,7 +350,7 @@ function HomeScreen({ families, onCreate, onSelect }) {
 }
 
 // ── DETAIL PANEL ──
-function DetailPanel({ person, spouse, parent, allKids, onSelect, onEdit, onAdd, onDelete, onVerify, setExpanded }) {
+function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLabel, getSpouseLabel, getParentLabel, onSelect, onEdit, onAdd, onDelete, onVerify, setExpanded }) {
   if (!person) return <div style={{ padding: 30, textAlign: 'center', color: '#ccc', fontSize: 13 }}>← Pick someone from the tree</div>
 
   const dead = person.status === 'deceased'
@@ -427,7 +376,7 @@ function DetailPanel({ person, spouse, parent, allKids, onSelect, onEdit, onAdd,
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13, marginBottom: 14 }}>
-        {[['Clan', person.clan], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Gen', `${person.generation}`]].map(([l, v]) => (
+        {[['Clan', getDisplayClan(person, persons)], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Generation', `${person.generation}`]].map(([l, v]) => (
           <div key={l}><div className="label" style={{ marginBottom: 2 }}>{l}</div><div style={{ color: '#444' }}>{v}</div></div>
         ))}
       </div>
@@ -439,13 +388,13 @@ function DetailPanel({ person, spouse, parent, allKids, onSelect, onEdit, onAdd,
             <div style={{ fontSize: 13, fontWeight: 500, color: spouse.status === 'deceased' ? '#aaa' : '#333', textDecoration: spouse.status === 'deceased' ? 'line-through' : 'none' }}>
               {spouse.status === 'deceased' ? '✝ ' : ''}{spouse.name}
             </div>
-            <div style={{ fontSize: 10, color: '#bbb' }}>{spouse.location || ''}</div>
+            <div style={{ fontSize: 10, color: '#C97B5D' }}>{getSpouseLabel(person)} · {spouse.location || ''}</div>
           </div>
         </div>
       )}
 
-      {person.gotra && <div style={{ fontSize: 12, color: '#8B6914', marginBottom: 4 }}>Gotra: {person.gotra}</div>}
-      {person.languages?.length > 0 && <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{person.languages.join(', ')}</div>}
+      {person.gotra && <div style={{ fontSize: 12, color: '#8B6914', marginBottom: 4 }}>{REL.gotra}: {person.gotra}</div>}
+      {person.languages?.length > 0 && <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{REL.languages}: {person.languages.join(', ')}</div>}
       {(occ.role || occ.company) && <div className="card" style={{ cursor: 'default', padding: 10, marginBottom: 8, fontSize: 13 }}><strong>{occ.role}</strong>{occ.company ? ` @ ${occ.company}` : ''}</div>}
 
       {Object.entries(profiles).filter(([, v]) => v).length > 0 && (
@@ -458,25 +407,41 @@ function DetailPanel({ person, spouse, parent, allKids, onSelect, onEdit, onAdd,
 
       {person.notes && <div className="card" style={{ cursor: 'default', fontSize: 13, color: '#666', lineHeight: 1.5, padding: 12 }}>{person.notes}</div>}
 
-      {parent && <div style={{ fontSize: 12, marginBottom: 6 }}>Parent: <span style={{ color: '#4A6FA5', cursor: 'pointer' }} onClick={() => onSelect(parent.id)}>{parent.name}</span></div>}
+      {parent && <div style={{ fontSize: 12, marginBottom: 6 }}>
+        <span style={{ color: '#999' }}>{getParentLabel(parent)}: </span>
+        <span style={{ color: '#4A6FA5', cursor: 'pointer' }} onClick={() => onSelect(parent.id)}>{parent.name}</span>
+      </div>}
 
       {allKids.length > 0 && (
         <div style={{ marginBottom: 8 }}>
-          <div className="label" style={{ marginBottom: 4 }}>Children ({allKids.length})</div>
+          <div className="label" style={{ marginBottom: 4 }}>{REL.children} ({allKids.length})</div>
           {allKids.map(k => (
             <div key={k.id} onClick={() => { onSelect(k.id); setExpanded(prev => { const n = new Set(prev); n.add(k.parentId); return n }) }}
-              className="card card-clickable" style={{ padding: '8px 12px', fontSize: 13, color: k.status === 'deceased' ? '#aaa' : '#4A6FA5' }}>
-              {k.status === 'deceased' ? '✝ ' : ''}{k.name}
+              className="card card-clickable" style={{ padding: '8px 12px', fontSize: 13, color: k.status === 'deceased' ? '#aaa' : '#4A6FA5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{k.status === 'deceased' ? '✝ ' : ''}{k.name}</span>
+              <span style={{ fontSize: 10, color: '#bbb' }}>{getChildLabel(k, person)}</span>
             </div>
           ))}
         </div>
       )}
 
       <div className="actions">
-        <button className="btn btn-gold btn-full" onClick={() => onAdd('ancestor')}>↑ Add parent / ancestor above</button>
-        {!person.spouseId && <button className="btn btn-copper btn-full" onClick={() => onAdd('spouse')}>♥ Add spouse</button>}
-        <button className="btn btn-green btn-full" onClick={() => onAdd('child')}>↓ Add child</button>
-        <button className="btn btn-grey btn-full" onClick={onDelete}>Delete this person</button>
+        <div style={{ fontSize: 10, color: '#bbb', fontWeight: 500, marginBottom: 4 }}>{REL.addFamily.toUpperCase()}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <button className="btn btn-gold" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('ancestor', 'M')}>↑ {REL.father} (Father)</button>
+          <button className="btn btn-gold" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('ancestor', 'F')}>↑ {REL.mother} (Mother)</button>
+        </div>
+        {!person.spouseId && (
+          <button className="btn btn-copper btn-full" style={{ marginTop: 6 }}
+            onClick={() => onAdd('spouse', person.gender === 'M' ? 'F' : 'M')}>
+            ♥ {person.gender === 'M' ? `${REL.wife} (Wife)` : `${REL.husband} (Husband)`}
+          </button>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+          <button className="btn btn-green" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('child', 'M')}>↓ {REL.son} (Son)</button>
+          <button className="btn btn-green" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('child', 'F')}>↓ {REL.daughter} (Daughter)</button>
+        </div>
+        <button className="btn btn-grey btn-full" style={{ marginTop: 8 }} onClick={onDelete}>Delete</button>
       </div>
     </div>
   )
@@ -490,9 +455,14 @@ function PersonForm({ mode, persons, fam, onSave, onCancel }) {
   const dir = mode.dir || 'child'
   const isSp = dir === 'spouse', isAnc = dir === 'ancestor'
   const defaultGen = isAnc ? (target ? target.generation - 1 : 0) : isSp ? (target ? target.generation : 0) : (target ? target.generation + 1 : 0)
+  const defaultGender = mode.gender || (isSp && target ? (target.gender === 'M' ? 'F' : 'M') : 'M')
+
+  const targetSpouse = (!isSp && !isAnc && target?.spouseId) ? persons.find(p => p.id === target.spouseId) : null
+  const childFather = (!isSp && !isAnc && target) ? (target.gender === 'M' ? target : (targetSpouse?.gender === 'M' ? targetSpouse : target)) : null
+  const defaultClan = childFather ? (childFather.clan || '') : (target?.clan || '')
 
   const [f, setF] = useState(existing || {
-    name: '', clan: target?.clan || '', gender: isSp && target ? (target.gender === 'M' ? 'F' : 'M') : 'M',
+    name: '', clan: defaultClan, gender: defaultGender,
     role: '', spouseId: null, location: isSp ? (target?.location || '') : '', status: isAnc ? 'deceased' : 'alive',
     generation: defaultGen, parentId: isAnc ? (target?.parentId || null) : (isSp ? null : mode.parentId || null),
     notes: '', verified: false, sortOrder: 0, phone: '', address: '',
@@ -502,13 +472,11 @@ function PersonForm({ mode, persons, fam, onSave, onCancel }) {
   })
   const [ftab, setFtab] = useState('basic')
   const u = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }))
-
   const title = isEdit ? `Edit ${f.name}` : isAnc ? '↑ Add ancestor' : isSp ? '♥ Add spouse' : '↓ Add ' + (target ? `under ${target.name}` : 'first person')
 
   return (
     <div style={{ padding: 16 }}>
       <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>{title}</div>
-
       <div className="form-tabs">
         {[['basic', 'Basic'], ['identity', 'Identity'], ['work', 'Work'], ['links', 'Profiles']].map(([t, l]) => (
           <button key={t} className={`form-tab ${ftab === t ? 'active' : ''}`} onClick={() => setFtab(t)}>{l}</button>
@@ -557,4 +525,36 @@ function PersonForm({ mode, persons, fam, onSave, onCancel }) {
       </div>
     </div>
   )
+}
+
+// ── Helpers ──
+function makeId(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now().toString(36)
+}
+
+function PersonToRow(p, familyId) {
+  return {
+    id: p.id, family_id: familyId, name: p.name || '', clan: p.clan || '',
+    gender: p.gender || 'M', status: p.status || 'alive', generation: p.generation || 0,
+    parent_id: p.parentId || null, spouse_id: p.spouseId || null,
+    location: p.location || '', native_place: p.nativePlace || '',
+    gotra: p.gotra || '', languages: p.languages || [],
+    occupation: p.occupation || { role: '', company: '' }, education: p.education || [],
+    profiles: p.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
+    phone: p.phone || '', address: p.address || '', role: p.role || '',
+    notes: p.notes || '', verified: p.verified || false, sort_order: p.sortOrder || 0,
+  }
+}
+
+function RowToPerson(r) {
+  return {
+    id: r.id, name: r.name, clan: r.clan, gender: r.gender, status: r.status,
+    generation: r.generation, parentId: r.parent_id, spouseId: r.spouse_id,
+    location: r.location, nativePlace: r.native_place, gotra: r.gotra,
+    languages: r.languages || [], occupation: r.occupation || { role: '', company: '' },
+    education: r.education || [],
+    profiles: r.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
+    phone: r.phone, address: r.address, role: r.role, notes: r.notes,
+    verified: r.verified, sortOrder: r.sort_order,
+  }
 }

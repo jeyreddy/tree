@@ -5,6 +5,7 @@
 create table families (
   id text primary key,
   name text not null,
+  language text default 'english',
   created_at timestamp with time zone default now()
 );
 
@@ -54,3 +55,7 @@ create policy "Public delete persons" on persons for delete using (true);
 -- Index for fast family lookups
 create index idx_persons_family on persons(family_id);
 create index idx_persons_parent on persons(parent_id);
+
+-- Migration: add language column to existing databases
+-- Run this if your families table already exists:
+-- alter table families add column if not exists language text default 'english';
