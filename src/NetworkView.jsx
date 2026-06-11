@@ -8,13 +8,37 @@ function getClanColor(clan, allClans) {
   return idx >= 0 ? CLAN_COLORS[idx % CLAN_COLORS.length] : '#888'
 }
 
-function buildEdges(persons) {
+function countDescendants(personId, persons) {
+  const person = persons.find(p => p.id === personId)
+  if (!person) return 0
+  const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
+  const children = persons.filter(p =>
+    p.parentId === personId || (spouse && p.parentId === spouse.id)
+  )
+  return children.length + children.reduce((sum, c) => sum + countDescendants(c.id, persons), 0)
+}
+
+function findPrimaryRootId(persons) {
+  const noParent = persons.filter(p => !p.parentId || !persons.find(x => x.id === p.parentId))
+  const rootIds = noParent.map(p => p.id)
+  if (!rootIds.length) return null
+  let bestRoot = rootIds[0], bestCount = -1
+  rootIds.forEach(rootId => {
+    const count = countDescendants(rootId, persons)
+    if (count > bestCount) { bestCount = count; bestRoot = rootId }
+  })
+  return bestRoot
+}
+
+function buildEdges(persons, primaryRootId) {
   const edges = []
   const siblingGroups = {}
 
   persons.forEach(p => {
     if (p.parentId) {
-      edges.push({ source: p.parentId, target: p.id, type: 'parent' })
+      const sourceHasNoParent = !persons.find(x => x.id === p.parentId)?.parentId
+      const isInLaw = sourceHasNoParent && p.parentId !== primaryRootId
+      edges.push({ source: p.parentId, target: p.id, type: isInLaw ? 'inlaw-parent' : 'parent' })
     }
     if (p.spouseId && p.id < p.spouseId) {
       edges.push({ source: p.id, target: p.spouseId, type: 'spouse' })
@@ -67,6 +91,7 @@ function simulate(nodes, edges) {
       let ideal = 120
       if (e.type === 'spouse') ideal = 60
       if (e.type === 'sibling') ideal = 80
+      if (e.type === 'inlaw-parent') ideal = 90
 
       const force = (d - ideal) / d * 0.1 * alpha
       a.x += dx * force
@@ -105,6 +130,7 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
   const { nodes, edges } = useMemo(() => {
     if (!persons.length) return { nodes: [], edges: [] }
     const hasChildren = new Set(persons.filter(p => p.parentId).map(p => p.parentId))
+    const primaryRootId = findPrimaryRootId(persons)
     const nodes = persons.map((p, i) => ({
       id: p.id,
       x: (i % 8) * 140 + Math.sin(i * 2.3) * 30,
@@ -112,7 +138,7 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
       generation: p.generation || 0,
       r: hasChildren.has(p.id) ? 20 : 14,
     }))
-    const edges = buildEdges(persons)
+    const edges = buildEdges(persons, primaryRootId)
     simulate(nodes, edges)
     return { nodes, edges }
   }, [persons])
@@ -194,6 +220,9 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
                 </g>
               )
             }
+            if (edge.type === 'inlaw-parent') {
+              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#C97B5D" strokeWidth={1.5} strokeDasharray="6,3" opacity={0.65} />
+            }
             if (edge.type === 'sibling') {
               return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#3a3a44" strokeWidth={1} strokeDasharray="3,3" />
             }
@@ -253,6 +282,7 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
           <span style={{ color: '#3a3a50' }}>── Parent-Child</span>
           <span style={{ color: '#E8A87C' }}>── ♥ Spouse</span>
           <span style={{ color: '#3a3a44' }}>··· Siblings</span>
+          <span style={{ color: '#C97B5D' }}>╌╌ In-law</span>
         </div>
       </div>
     </div>

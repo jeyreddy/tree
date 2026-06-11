@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 const CLAN_COLORS = ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D', '#7BAAAA', '#A0522D', '#708090']
-const CARD_W = 140, CARD_H = 55, COUPLE_GAP = 12, SIB_GAP = 16, GEN_GAP = 60, CONN_DROP = 25
+const CARD_W = 140, CARD_H = 55, COUPLE_GAP = 12, SIB_GAP = 16, GEN_GAP = 60, CONN_DROP = 25, IN_LAW_GAP = 50
 
 export function findRoots(persons) {
   const noParent = persons.filter(p => !p.parentId || !persons.find(x => x.id === p.parentId))
@@ -30,6 +30,26 @@ export function findRoots(persons) {
   })
 
   return roots
+}
+
+function countDescendants(personId, persons) {
+  const person = persons.find(p => p.id === personId)
+  if (!person) return 0
+  const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
+  const children = persons.filter(p =>
+    p.parentId === personId || (spouse && p.parentId === spouse.id)
+  )
+  return children.length + children.reduce((sum, c) => sum + countDescendants(c.id, persons), 0)
+}
+
+export function findPrimaryRoot(rootIds, persons) {
+  if (!rootIds.length) return null
+  let bestRoot = rootIds[0], bestCount = -1
+  rootIds.forEach(rootId => {
+    const count = countDescendants(rootId, persons)
+    if (count > bestCount) { bestCount = count; bestRoot = rootId }
+  })
+  return bestRoot
 }
 
 function getCoupleChildren(personId, spouseId, persons) {
@@ -116,14 +136,60 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
   const isPanning = useRef(false)
   const lastMouse = useRef(null)
 
+  // ── Layout ──
   const allCards = [], allConnectors = []
-  let rx = 0
-  for (const rootId of rootIds) {
-    const layout = layoutFamily(rootId, rx, 0, persons)
+  const primaryRootId = findPrimaryRoot(rootIds, persons)
+
+  let primaryWidth = 0
+  if (primaryRootId) {
+    const layout = layoutFamily(primaryRootId, 0, 0, persons)
     allCards.push(...layout.cards)
     allConnectors.push(...layout.connectors)
-    rx += layout.width + SIB_GAP * 2
+    primaryWidth = layout.width
   }
+
+  // Independent trees start to the right of the primary tree
+  let rx = primaryWidth + SIB_GAP * 2
+
+  for (const rootId of rootIds) {
+    if (rootId === primaryRootId) continue
+    const rootPerson = persons.find(p => p.id === rootId)
+    if (!rootPerson) continue
+
+    // Find the first child of this root that is already in the main layout
+    const childInMain = persons.find(p => p.parentId === rootId && allCards.some(c => c.id === p.id))
+
+    if (childInMain) {
+      // In-law parent: float above the married-in child
+      const childCard = allCards.find(c => c.id === childInMain.id)
+      const rootSpouse = rootPerson.spouseId ? persons.find(p => p.id === rootPerson.spouseId) : null
+      const coupleW = rootSpouse ? CARD_W * 2 + COUPLE_GAP : CARD_W
+      const coupleCenter = childCard.x + CARD_W / 2
+      const inLawX = coupleCenter - coupleW / 2
+      const inLawY = childCard.y - CARD_H - IN_LAW_GAP
+
+      allCards.push({ id: rootPerson.id, x: inLawX, y: inLawY, w: CARD_W, h: CARD_H, inLaw: true })
+      if (rootSpouse) {
+        allCards.push({ id: rootSpouse.id, x: inLawX + CARD_W + COUPLE_GAP, y: inLawY, w: CARD_W, h: CARD_H, inLaw: true })
+        allConnectors.push({ type: 'spouse', x1: inLawX + CARD_W, y1: inLawY + CARD_H / 2, x2: inLawX + CARD_W + COUPLE_GAP, y2: inLawY + CARD_H / 2 })
+      }
+      // Dashed copper line from in-law parent down to their married-in child
+      allConnectors.push({
+        type: 'inlaw-link',
+        x1: coupleCenter,
+        y1: inLawY + CARD_H,
+        x2: childCard.x + CARD_W / 2,
+        y2: childCard.y,
+      })
+    } else {
+      // Truly independent family — lay out to the right
+      const layout = layoutFamily(rootId, rx, 0, persons)
+      allCards.push(...layout.cards)
+      allConnectors.push(...layout.connectors)
+      rx += layout.width + SIB_GAP * 2
+    }
+  }
+
   const seenIds = new Set()
   const uniqueCards = allCards.filter(card => {
     if (seenIds.has(card.id)) return false
@@ -187,6 +253,13 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
       >
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {allConnectors.map((conn, i) => {
+            if (conn.type === 'inlaw-link') {
+              return (
+                <line key={`il${i}`}
+                  x1={conn.x1} y1={conn.y1} x2={conn.x2} y2={conn.y2}
+                  stroke="#C97B5D" strokeWidth={1.5} strokeDasharray="6,3" opacity={0.65} />
+              )
+            }
             if (conn.type === 'spouse') {
               const mx = (conn.x1 + conn.x2) / 2
               return (
@@ -217,18 +290,21 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
           {uniqueCards.map(card => {
             const p = persons.find(x => x.id === card.id); if (!p) return null
             const isSelected = sel === p.id, isDead = p.status === 'deceased'
+            const isInLaw = !!card.inLaw
             const clanColor = getClanColor(p.clan, clans)
             const displayClan = getDisplayClan(p, persons)
             const displayName = (isDead ? '✝ ' : '') + (p.name.length > 18 ? p.name.slice(0, 16) + '…' : p.name)
+            const cardBg = isDead ? (isInLaw ? '#f8f5f0' : '#f5f5f5') : (isInLaw ? '#fffaf5' : '#fff')
             return (
               <g key={card.id} onClick={e => { e.stopPropagation(); setSel(card.id) }} style={{ cursor: 'pointer' }}>
                 {isSelected && <rect x={card.x - 2} y={card.y - 2} width={card.w + 4} height={card.h + 4} rx={8} fill="none" stroke="#4A6FA5" strokeWidth={1.5} />}
                 <rect x={card.x} y={card.y} width={card.w} height={card.h} rx={6}
-                  fill={isDead ? '#f5f5f5' : '#fff'} stroke={isDead ? '#ccc' : '#e8e8e8'}
+                  fill={cardBg} stroke={isDead ? '#ccc' : (isInLaw ? '#e8d8c8' : '#e8e8e8')}
                   strokeWidth={1} strokeDasharray={isDead ? '4,2' : undefined} />
-                <rect x={card.x} y={card.y} width={3} height={card.h} rx={1} fill={clanColor} />
+                <rect x={card.x} y={card.y} width={3} height={card.h} rx={1}
+                  fill={clanColor} opacity={isInLaw ? 0.55 : 1} />
                 <text x={card.x + 10} y={card.y + 15} fontSize={11} fontWeight="600"
-                  fill={isDead ? '#aaa' : '#1a1a1a'}
+                  fill={isDead ? '#aaa' : (isInLaw ? '#555' : '#1a1a1a')}
                   textDecoration={isDead ? 'line-through' : undefined}
                   fontFamily="DM Sans,sans-serif">{displayName}</text>
                 {displayClan && (
