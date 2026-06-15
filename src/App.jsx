@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
-import { SVGTree, findRoots, getDisplayClan } from './SVGTree'
-import { NetworkView } from './NetworkView'
+import { getDisplayClan } from './SVGTree'
+import { LocalGraph } from './LocalGraph'
 
 // ── DB helpers ──
 const db = {
@@ -58,7 +58,6 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(new Set())
   const [tab, setTab] = useState('tree')
-  const [view, setView] = useState('chart')
 
   // Boot
   useEffect(() => {
@@ -92,7 +91,6 @@ export default function App() {
   const selected = sel ? persons.find(p => p.id === sel) : null
   const spouse = selected?.spouseId ? persons.find(p => p.id === selected.spouseId) : null
   const parent = selected?.parentId ? persons.find(p => p.id === selected.parentId) : null
-  const rootIds = findRoots(persons)
 
   const savePerson = async (form) => {
     if (mode?.type === 'add') {
@@ -185,8 +183,6 @@ export default function App() {
   const getSpouseLabel = (person) => person.gender === 'M' ? REL.wife : REL.husband
   const getParentLabel = (par) => par.gender === 'M' ? REL.father : REL.mother
 
-  const addRootAction = persons.length > 0 ? () => setMode({ type: 'add', dir: 'child', parentId: null }) : undefined
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div className="header">
@@ -218,17 +214,11 @@ export default function App() {
       </div>
 
       {tab === 'tree' && (
-        <div className="split" style={{ flex: 1, minHeight: 0 }}>
+        <div className="split" style={{ flex: 1, minHeight: 0, gridTemplateColumns: '1fr 300px' }}>
           {/* Left: chart or network */}
           <div className="split-left" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, flex: 1, padding: '7px 10px' }} />
-              {!search && persons.length > 0 && (
-                <>
-                  <button onClick={() => setView('chart')} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, background: view === 'chart' ? '#1a1a1a' : '#f0f0f0', color: view === 'chart' ? '#fff' : '#999', border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Chart</button>
-                  <button onClick={() => setView('network')} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, background: view === 'network' ? '#1a1a1a' : '#f0f0f0', color: view === 'network' ? '#fff' : '#999', border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Network</button>
-                </>
-              )}
+            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, padding: '7px 10px' }} />
             </div>
 
             {persons.length === 0 && !search ? (
@@ -251,22 +241,13 @@ export default function App() {
                   </div>
                 ))}
               </div>
-            ) : view === 'chart' ? (
-              <SVGTree
-                persons={persons}
-                sel={sel}
-                setSel={id => { setSel(id); setSearch('') }}
-                clans={clans}
-                rootIds={rootIds}
-                onAddRoot={addRootAction}
-              />
             ) : (
-              <NetworkView
+              <LocalGraph
                 persons={persons}
                 sel={sel}
                 setSel={id => { setSel(id); setSearch('') }}
                 clans={clans}
-                onAddRoot={addRootAction}
+                REL={REL}
               />
             )}
           </div>
@@ -358,10 +339,10 @@ function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLa
   const occ = person.occupation || {}
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+    <div style={{ padding: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none' }}>
             {dead ? '✝ ' : ''}{person.name}
           </div>
           {person.role && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{person.role}</div>}
@@ -375,7 +356,7 @@ function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLa
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', fontSize: 12, marginBottom: 10 }}>
         {[['Clan', getDisplayClan(person, persons)], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Generation', `${person.generation}`]].map(([l, v]) => (
           <div key={l}><div className="label" style={{ marginBottom: 2 }}>{l}</div><div style={{ color: '#444' }}>{v}</div></div>
         ))}

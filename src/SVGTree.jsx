@@ -129,15 +129,77 @@ function layoutFamily(personId, startX, startY, persons) {
   return { width: totalW, cards, connectors, coupleCenter }
 }
 
+function recomputeConnectors(finalCards, persons, inLawLinks) {
+  const cardMap = {}
+  finalCards.forEach(c => { cardMap[c.id] = c })
+  const connectors = []
+  const spouseDone = new Set()
+  const parentsDone = new Set()
+
+  persons.forEach(person => {
+    const card = cardMap[person.id]; if (!card) return
+    const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
+    const spouseCard = spouse ? cardMap[spouse.id] : null
+    const pairKey = person.spouseId ? [person.id, person.spouseId].sort().join('|') : `solo:${person.id}`
+
+    if (spouseCard && !spouseDone.has(pairKey)) {
+      spouseDone.add(pairKey)
+      const left = card.x <= spouseCard.x ? card : spouseCard
+      const right = card.x <= spouseCard.x ? spouseCard : card
+      connectors.push({ type: 'spouse', x1: left.x + CARD_W, y1: left.y + CARD_H / 2, x2: right.x, y2: right.y + CARD_H / 2 })
+    }
+
+    if (!card.inLaw && !parentsDone.has(pairKey)) {
+      parentsDone.add(pairKey)
+      const seen = new Set()
+      const childPersons = persons.filter(c => {
+        if (c.parentId !== person.id && !(spouse && c.parentId === spouse.id)) return false
+        if (seen.has(c.id)) return false
+        seen.add(c.id); return true
+      })
+      if (childPersons.length > 0) {
+        const allPCards = [card, spouseCard].filter(Boolean)
+        const pcx = (Math.min(...allPCards.map(c => c.x)) + Math.max(...allPCards.map(c => c.x + CARD_W))) / 2
+        const pby = Math.max(...allPCards.map(c => c.y + CARD_H))
+        const childCards = childPersons.map(c => cardMap[c.id]).filter(Boolean)
+        if (childCards.length > 0) {
+          connectors.push({
+            type: 'parent-children',
+            parentX: pcx, parentY: pby,
+            children: childCards.map(c => c.x + CARD_W / 2),
+            childY: Math.min(...childCards.map(c => c.y)),
+          })
+        }
+      }
+    }
+  })
+
+  inLawLinks.forEach(({ parentId, childId }) => {
+    const parentCard = cardMap[parentId]; const childCard = cardMap[childId]
+    if (!parentCard || !childCard) return
+    const parentPerson = persons.find(p => p.id === parentId)
+    const rootSpouseCard = parentPerson?.spouseId ? cardMap[parentPerson.spouseId] : null
+    const allPCards = [parentCard, rootSpouseCard].filter(Boolean)
+    const pcx = (Math.min(...allPCards.map(c => c.x)) + Math.max(...allPCards.map(c => c.x + CARD_W))) / 2
+    connectors.push({ type: 'inlaw-link', x1: pcx, y1: parentCard.y + CARD_H, x2: childCard.x + CARD_W / 2, y2: childCard.y })
+  })
+
+  return connectors
+}
+
 export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
   const [pan, setPan] = useState({ x: 40, y: 40 })
   const [zoom, setZoom] = useState(1)
+  const [cardPositions, setCardPositions] = useState({})
   const svgRef = useRef(null)
   const isPanning = useRef(false)
   const lastMouse = useRef(null)
+  const dragIdRef = useRef(null)
+  const dragBaseRef = useRef(null)
+  const didDragRef = useRef(false)
 
   // ── Layout ──
-  const allCards = [], allConnectors = []
+  const allCards = [], allConnectors = [], inLawLinks = []
   const primaryRootId = findPrimaryRoot(rootIds, persons)
 
   let primaryWidth = 0
@@ -148,7 +210,6 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
     primaryWidth = layout.width
   }
 
-  // Independent trees start to the right of the primary tree
   let rx = primaryWidth + SIB_GAP * 2
 
   for (const rootId of rootIds) {
@@ -156,11 +217,9 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
     const rootPerson = persons.find(p => p.id === rootId)
     if (!rootPerson) continue
 
-    // Find the first child of this root that is already in the main layout
     const childInMain = persons.find(p => p.parentId === rootId && allCards.some(c => c.id === p.id))
 
     if (childInMain) {
-      // In-law parent: float above the married-in child
       const childCard = allCards.find(c => c.id === childInMain.id)
       const rootSpouse = rootPerson.spouseId ? persons.find(p => p.id === rootPerson.spouseId) : null
       const coupleW = rootSpouse ? CARD_W * 2 + COUPLE_GAP : CARD_W
@@ -173,16 +232,9 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
         allCards.push({ id: rootSpouse.id, x: inLawX + CARD_W + COUPLE_GAP, y: inLawY, w: CARD_W, h: CARD_H, inLaw: true })
         allConnectors.push({ type: 'spouse', x1: inLawX + CARD_W, y1: inLawY + CARD_H / 2, x2: inLawX + CARD_W + COUPLE_GAP, y2: inLawY + CARD_H / 2 })
       }
-      // Dashed copper line from in-law parent down to their married-in child
-      allConnectors.push({
-        type: 'inlaw-link',
-        x1: coupleCenter,
-        y1: inLawY + CARD_H,
-        x2: childCard.x + CARD_W / 2,
-        y2: childCard.y,
-      })
+      allConnectors.push({ type: 'inlaw-link', x1: coupleCenter, y1: inLawY + CARD_H, x2: childCard.x + CARD_W / 2, y2: childCard.y })
+      inLawLinks.push({ parentId: rootPerson.id, childId: childInMain.id })
     } else {
-      // Truly independent family — lay out to the right
       const layout = layoutFamily(rootId, rx, 0, persons)
       allCards.push(...layout.cards)
       allConnectors.push(...layout.connectors)
@@ -195,8 +247,15 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
     if (seenIds.has(card.id)) return false
     seenIds.add(card.id); return true
   })
-  const cardsRef = useRef(uniqueCards)
-  cardsRef.current = uniqueCards
+
+  const finalCards = uniqueCards.map(card =>
+    cardPositions[card.id] ? { ...card, ...cardPositions[card.id] } : card
+  )
+  const hasOverrides = Object.keys(cardPositions).length > 0
+  const finalConnectors = hasOverrides ? recomputeConnectors(finalCards, persons, inLawLinks) : allConnectors
+
+  const cardsRef = useRef([])
+  cardsRef.current = finalCards
 
   useEffect(() => {
     const el = svgRef.current; if (!el) return
@@ -221,6 +280,7 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
   useEffect(() => {
     if (persons.length > 0 && persons.length !== prevLen.current) {
       prevLen.current = persons.length
+      setCardPositions({})
       setTimeout(fitTree, 60)
     }
   }, [persons.length, fitTree])
@@ -232,27 +292,57 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
     setPan({ x: rect.width / 2 - (card.x + card.w / 2) * zoom, y: rect.height / 2 - (card.y + card.h / 2) * zoom })
   }, [sel]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const toSVGCoords = (clientX, clientY) => {
+    const rect = svgRef.current.getBoundingClientRect()
+    return { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom }
+  }
+
+  const handleSVGMouseDown = (e) => {
+    if (e.button !== 0) return
+    isPanning.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }
+    e.currentTarget.style.cursor = 'grabbing'
+  }
+
+  const handleSVGMouseMove = (e) => {
+    if (dragIdRef.current && dragBaseRef.current) {
+      const { x, y } = toSVGCoords(e.clientX, e.clientY)
+      const dx = x - dragBaseRef.current.mouseX, dy = y - dragBaseRef.current.mouseY
+      if (Math.abs(dx) + Math.abs(dy) > 1) didDragRef.current = true
+      const newX = dragBaseRef.current.cardX + dx, newY = dragBaseRef.current.cardY + dy
+      const updates = { [dragIdRef.current]: { x: newX, y: newY } }
+      if (dragBaseRef.current.spouseId) {
+        updates[dragBaseRef.current.spouseId] = {
+          x: newX + dragBaseRef.current.spouseDx,
+          y: newY + dragBaseRef.current.spouseDy,
+        }
+      }
+      setCardPositions(prev => ({ ...prev, ...updates }))
+      return
+    }
+    if (!isPanning.current || !lastMouse.current) return
+    const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
+    lastMouse.current = { x: e.clientX, y: e.clientY }
+    setPan(p => ({ x: p.x + dx, y: p.y + dy }))
+  }
+
+  const handleSVGMouseUp = (e) => {
+    dragIdRef.current = null; dragBaseRef.current = null
+    isPanning.current = false
+    if (e.currentTarget) e.currentTarget.style.cursor = 'grab'
+  }
+
   return (
     <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
       <svg
         ref={svgRef}
         style={{ width: '100%', height: '100%', display: 'block', background: '#fafafa', cursor: 'grab' }}
-        onMouseDown={e => {
-          if (e.button !== 0) return
-          isPanning.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }
-          e.currentTarget.style.cursor = 'grabbing'
-        }}
-        onMouseMove={e => {
-          if (!isPanning.current || !lastMouse.current) return
-          const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
-          lastMouse.current = { x: e.clientX, y: e.clientY }
-          setPan(p => ({ x: p.x + dx, y: p.y + dy }))
-        }}
-        onMouseUp={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
-        onMouseLeave={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
+        onMouseDown={handleSVGMouseDown}
+        onMouseMove={handleSVGMouseMove}
+        onMouseUp={handleSVGMouseUp}
+        onMouseLeave={handleSVGMouseUp}
       >
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-          {allConnectors.map((conn, i) => {
+          {finalConnectors.map((conn, i) => {
             if (conn.type === 'inlaw-link') {
               return (
                 <line key={`il${i}`}
@@ -287,16 +377,37 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
             return null
           })}
 
-          {uniqueCards.map(card => {
+          {finalCards.map(card => {
             const p = persons.find(x => x.id === card.id); if (!p) return null
             const isSelected = sel === p.id, isDead = p.status === 'deceased'
             const isInLaw = !!card.inLaw
+            const isDragging = dragIdRef.current === card.id
             const clanColor = getClanColor(p.clan, clans)
             const displayClan = getDisplayClan(p, persons)
             const displayName = (isDead ? '✝ ' : '') + (p.name.length > 18 ? p.name.slice(0, 16) + '…' : p.name)
             const cardBg = isDead ? (isInLaw ? '#f8f5f0' : '#f5f5f5') : (isInLaw ? '#fffaf5' : '#fff')
             return (
-              <g key={card.id} onClick={e => { e.stopPropagation(); setSel(card.id) }} style={{ cursor: 'pointer' }}>
+              <g key={card.id}
+                style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
+                onClick={e => { e.stopPropagation(); if (!didDragRef.current) setSel(card.id) }}
+                onMouseDown={e => {
+                  e.stopPropagation()
+                  didDragRef.current = false
+                  const { x, y } = toSVGCoords(e.clientX, e.clientY)
+                  const person = persons.find(q => q.id === card.id)
+                  const spouseCard = person?.spouseId ? finalCards.find(c => c.id === person.spouseId) : null
+                  dragIdRef.current = card.id
+                  dragBaseRef.current = {
+                    mouseX: x, mouseY: y,
+                    cardX: card.x, cardY: card.y,
+                    spouseId: person?.spouseId || null,
+                    spouseDx: spouseCard ? spouseCard.x - card.x : 0,
+                    spouseDy: spouseCard ? spouseCard.y - card.y : 0,
+                  }
+                  if (svgRef.current) svgRef.current.style.cursor = 'grabbing'
+                }}
+              >
+                {isDragging && <rect x={card.x - 3} y={card.y - 3} width={card.w + 6} height={card.h + 6} rx={9} fill="none" stroke="#4A6FA5" strokeWidth={2} opacity={0.4} />}
                 {isSelected && <rect x={card.x - 2} y={card.y - 2} width={card.w + 4} height={card.h + 4} rx={8} fill="none" stroke="#4A6FA5" strokeWidth={1.5} />}
                 <rect x={card.x} y={card.y} width={card.w} height={card.h} rx={6}
                   fill={cardBg} stroke={isDead ? '#ccc' : (isInLaw ? '#e8d8c8' : '#e8e8e8')}
@@ -328,6 +439,9 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
         <button onClick={fitTree} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600, background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Fit</button>
         <button onClick={() => setZoom(z => Math.min(3, z * 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#f0f0f0', color: '#555', border: 'none', borderRadius: 6, cursor: 'pointer' }}>+</button>
         <button onClick={() => setZoom(z => Math.max(0.1, z / 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#f0f0f0', color: '#555', border: 'none', borderRadius: 6, cursor: 'pointer' }}>−</button>
+        {hasOverrides && (
+          <button onClick={() => setCardPositions({})} style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, background: '#f0e8d8', color: '#8B6914', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Reset</button>
+        )}
         {onAddRoot && (
           <button onClick={onAddRoot} style={{ padding: '4px 8px', fontSize: 11, background: 'transparent', color: '#bbb', border: '1.5px dashed #ddd', borderRadius: 6, cursor: 'pointer', marginLeft: 4 }}>+ Root</button>
         )}

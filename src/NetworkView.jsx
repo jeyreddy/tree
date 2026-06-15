@@ -65,7 +65,6 @@ function simulate(nodes, edges) {
   for (let iter = 0; iter < 200; iter++) {
     const alpha = 1 - iter / 200
 
-    // Repulsion between all nodes
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const dx = nodes[j].x - nodes[i].x
@@ -79,7 +78,6 @@ function simulate(nodes, edges) {
       }
     }
 
-    // Attraction along edges
     edges.forEach(e => {
       const a = nodeMap[e.source]
       const b = nodeMap[e.target]
@@ -106,13 +104,11 @@ function simulate(nodes, edges) {
       }
     })
 
-    // Generation row gravity
     nodes.forEach(n => {
       const targetY = n.generation * 150
       n.y += (targetY - n.y) * 0.05 * alpha
     })
 
-    // Center gravity
     let cx = 0, cy = 0
     nodes.forEach(n => { cx += n.x; cy += n.y })
     cx /= nodes.length; cy /= nodes.length
@@ -123,9 +119,13 @@ function simulate(nodes, edges) {
 export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
+  const [nodePositions, setNodePositions] = useState({})
   const svgRef = useRef(null)
   const isPanning = useRef(false)
   const lastMouse = useRef(null)
+  const dragNodeIdRef = useRef(null)
+  const dragNodeBaseRef = useRef(null)
+  const didDragNodeRef = useRef(false)
 
   const { nodes, edges } = useMemo(() => {
     if (!persons.length) return { nodes: [], edges: [] }
@@ -143,8 +143,18 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
     return { nodes, edges }
   }, [persons])
 
-  const nodesRef = useRef(nodes)
-  nodesRef.current = nodes
+  // Clear manual overrides when simulation re-runs (persons changed)
+  useEffect(() => { setNodePositions({}) }, [nodes])
+
+  const finalNodes = nodes.map(n =>
+    nodePositions[n.id] ? { ...n, ...nodePositions[n.id] } : n
+  )
+
+  const nodeMap = {}
+  finalNodes.forEach(n => { nodeMap[n.id] = n })
+
+  const nodesRef = useRef([])
+  nodesRef.current = finalNodes
 
   useEffect(() => {
     const el = svgRef.current; if (!el) return
@@ -178,24 +188,54 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
     setPan({ x: rect.width / 2 - node.x * zoom, y: rect.height / 2 - node.y * zoom })
   }, [sel]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const toSVGCoords = (clientX, clientY) => {
+    const rect = svgRef.current.getBoundingClientRect()
+    return { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom }
+  }
+
+  const handleSVGMouseDown = (e) => {
+    if (e.button !== 0) return
+    isPanning.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }
+    e.currentTarget.style.cursor = 'grabbing'
+  }
+
+  const handleSVGMouseMove = (e) => {
+    if (dragNodeIdRef.current && dragNodeBaseRef.current) {
+      const { x, y } = toSVGCoords(e.clientX, e.clientY)
+      const dx = x - dragNodeBaseRef.current.mouseX, dy = y - dragNodeBaseRef.current.mouseY
+      if (Math.abs(dx) + Math.abs(dy) > 1) didDragNodeRef.current = true
+      setNodePositions(prev => ({
+        ...prev,
+        [dragNodeIdRef.current]: {
+          x: dragNodeBaseRef.current.nodeX + dx,
+          y: dragNodeBaseRef.current.nodeY + dy,
+        },
+      }))
+      return
+    }
+    if (!isPanning.current || !lastMouse.current) return
+    const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
+    lastMouse.current = { x: e.clientX, y: e.clientY }
+    setPan(p => ({ x: p.x + dx, y: p.y + dy }))
+  }
+
+  const handleSVGMouseUp = (e) => {
+    dragNodeIdRef.current = null; dragNodeBaseRef.current = null
+    isPanning.current = false
+    if (e.currentTarget) e.currentTarget.style.cursor = 'grab'
+  }
+
+  const hasOverrides = Object.keys(nodePositions).length > 0
+
   return (
     <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
       <svg
         ref={svgRef}
         style={{ width: '100%', height: '100%', display: 'block', cursor: 'grab' }}
-        onMouseDown={e => {
-          if (e.button !== 0) return
-          isPanning.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }
-          e.currentTarget.style.cursor = 'grabbing'
-        }}
-        onMouseMove={e => {
-          if (!isPanning.current || !lastMouse.current) return
-          const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
-          lastMouse.current = { x: e.clientX, y: e.clientY }
-          setPan(p => ({ x: p.x + dx, y: p.y + dy }))
-        }}
-        onMouseUp={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
-        onMouseLeave={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
+        onMouseDown={handleSVGMouseDown}
+        onMouseMove={handleSVGMouseMove}
+        onMouseUp={handleSVGMouseUp}
+        onMouseLeave={handleSVGMouseUp}
       >
         <defs>
           <pattern id="netgrid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -207,8 +247,8 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
 
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {edges.map((edge, i) => {
-            const a = nodes.find(n => n.id === edge.source)
-            const b = nodes.find(n => n.id === edge.target)
+            const a = nodeMap[edge.source]
+            const b = nodeMap[edge.target]
             if (!a || !b) return null
             if (edge.type === 'spouse') {
               const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
@@ -229,16 +269,31 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
             return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#3a3a50" strokeWidth={1.5} />
           })}
 
-          {nodes.map(node => {
+          {finalNodes.map(node => {
             const p = persons.find(x => x.id === node.id); if (!p) return null
             const isSelected = sel === p.id
             const isDead = p.status === 'deceased'
+            const isDragging = dragNodeIdRef.current === node.id
             const clanColor = getClanColor(p.clan, clans)
             const label = p.name.length > 16 ? p.name.slice(0, 14) + '…' : p.name
             return (
-              <g key={node.id} onClick={e => { e.stopPropagation(); setSel(node.id) }} style={{ cursor: 'pointer' }}>
+              <g key={node.id}
+                style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
+                onClick={e => { e.stopPropagation(); if (!didDragNodeRef.current) setSel(node.id) }}
+                onMouseDown={e => {
+                  e.stopPropagation()
+                  didDragNodeRef.current = false
+                  const { x, y } = toSVGCoords(e.clientX, e.clientY)
+                  dragNodeIdRef.current = node.id
+                  dragNodeBaseRef.current = { mouseX: x, mouseY: y, nodeX: node.x, nodeY: node.y }
+                  if (svgRef.current) svgRef.current.style.cursor = 'grabbing'
+                }}
+              >
                 {isSelected && (
                   <circle cx={node.x} cy={node.y} r={node.r + 7} fill="none" stroke="#4A6FA5" strokeWidth={2} opacity={0.8} />
+                )}
+                {isDragging && (
+                  <circle cx={node.x} cy={node.y} r={node.r + 5} fill="rgba(74,111,165,0.15)" />
                 )}
                 <circle
                   cx={node.x} cy={node.y} r={node.r}
@@ -268,6 +323,9 @@ export function NetworkView({ persons, sel, setSel, clans, onAddRoot }) {
         <button onClick={fitNet} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600, background: '#333', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Fit</button>
         <button onClick={() => setZoom(z => Math.min(3, z * 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#333', color: '#aaa', border: 'none', borderRadius: 6, cursor: 'pointer' }}>+</button>
         <button onClick={() => setZoom(z => Math.max(0.1, z / 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#333', color: '#aaa', border: 'none', borderRadius: 6, cursor: 'pointer' }}>−</button>
+        {hasOverrides && (
+          <button onClick={() => setNodePositions({})} style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, background: '#2a2a1f', color: '#C4A35A', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Reset</button>
+        )}
         {onAddRoot && (
           <button onClick={onAddRoot} style={{ padding: '4px 8px', fontSize: 11, background: 'transparent', color: '#555', border: '1.5px dashed #444', borderRadius: 6, cursor: 'pointer', marginLeft: 4 }}>+ Root</button>
         )}
