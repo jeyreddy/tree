@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import { getDisplayClan } from './SVGTree'
 import { LocalGraph } from './LocalGraph'
+import MapView from './MapView'
 
 // ── DB helpers ──
 const db = {
@@ -74,6 +75,7 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('kv-username') || '')
   const [referrals, setReferrals] = useState([])
+  const [view, setView] = useState('graph')
 
   // Boot
   useEffect(() => {
@@ -172,6 +174,12 @@ export default function App() {
     await refresh()
   }
 
+  const handleContextMenu = (personId, event) => {
+    event.preventDefault()
+    const person = persons.find(p => p.id === personId)
+    if (person) setContextMenu({ person, position: { x: event.clientX, y: event.clientY } })
+  }
+
   const moveSib = async (id, dir) => {
     const p = persons.find(x => x.id === id)
     if (!p) return
@@ -258,44 +266,73 @@ export default function App() {
 
       {tab === 'tree' && (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-          <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, padding: '7px 10px' }} />
-          </div>
-
-          {persons.length === 0 && !search ? (
+          {persons.length === 0 ? (
             <div className="empty" style={{ flex: 1 }}>
               <div className="empty-icon">🌱</div>
               <div className="empty-title">Start your tree</div>
               <div className="empty-sub">Add the first person — yourself or the oldest ancestor you know</div>
               <button className="btn btn-dark" onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}>+ Add first person</button>
             </div>
-          ) : search ? (
-            <div style={{ overflowY: 'auto', flex: 1, padding: '4px 12px 12px' }}>
-              {filtered.map(p => (
-                <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
-                  onClick={() => { setSel(p.id); setSearch('') }}>
-                  <span style={{ width: 14 }} />
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>
-                    {(p.status === 'deceased' ? '✝ ' : '') + p.name}{p.clan ? ` (${p.clan})` : ''}
-                  </span>
-                  <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.location || ''}</span>
-                </div>
-              ))}
-            </div>
           ) : (
-            <LocalGraph
-              persons={persons}
-              sel={sel}
-              setSel={id => { setSel(id); setSearch('') }}
-              clans={clans}
-              REL={REL}
-              referrals={referrals}
-              onContextMenu={(personId, event) => {
-                event.preventDefault()
-                const person = persons.find(p => p.id === personId)
-                if (person) setContextMenu({ person, position: { x: event.clientX, y: event.clientY } })
-              }}
-            />
+            <>
+              {/* Floating search + view toggle */}
+              <div style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1000, display: 'flex', gap: 6, pointerEvents: 'none' }}>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search people…"
+                  style={{ flex: 1, padding: '7px 10px', marginBottom: 0, borderRadius: 8, border: '1px solid #e0e0e0', background: '#fff', fontSize: 13, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', pointerEvents: 'all' }}
+                />
+                <div style={{ display: 'flex', background: '#fff', borderRadius: 8, border: '1px solid #e0e0e0', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', flexShrink: 0, pointerEvents: 'all' }}>
+                  <button onClick={() => setView('graph')}
+                    style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'graph' ? '#1a1a1a' : 'transparent', color: view === 'graph' ? '#fff' : '#999' }}>
+                    Graph
+                  </button>
+                  <button onClick={() => setView('map')}
+                    style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'map' ? '#1a1a1a' : 'transparent', color: view === 'map' ? '#fff' : '#999' }}>
+                    Map
+                  </button>
+                </div>
+              </div>
+
+              {/* Main view */}
+              {view === 'map' ? (
+                <MapView
+                  persons={persons}
+                  sel={sel}
+                  setSel={id => { setSel(id); setSearch('') }}
+                  onContextMenu={handleContextMenu}
+                />
+              ) : (
+                <LocalGraph
+                  persons={persons}
+                  sel={sel}
+                  setSel={id => { setSel(id); setSearch('') }}
+                  clans={clans}
+                  REL={REL}
+                  referrals={referrals}
+                  onContextMenu={handleContextMenu}
+                />
+              )}
+
+              {/* Search results overlay */}
+              {search && (
+                <div style={{ position: 'absolute', top: 44, left: 8, right: 8, background: '#fff', borderRadius: 8, border: '1px solid #e0e0e0', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 999, maxHeight: '60vh', overflowY: 'auto' }}>
+                  {filtered.length === 0
+                    ? <div style={{ padding: '12px 16px', fontSize: 12, color: '#bbb' }}>No results</div>
+                    : filtered.map(p => (
+                      <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
+                        onClick={() => { setSel(p.id); setSearch('') }}>
+                        <span style={{ width: 14 }} />
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>
+                          {(p.status === 'deceased' ? '✝ ' : '') + p.name}{p.clan ? ` (${p.clan})` : ''}
+                        </span>
+                        <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.location || ''}</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </>
           )}
 
           {contextMenu && (

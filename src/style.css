@@ -112,6 +112,11 @@ button:hover { opacity: 0.85; }
 .home-title { font-size: 32px; font-weight: 700; color: #1a1a1a; letter-spacing: -1px; text-align: center; }
 .home-sub { font-size: 14px; color: #999; margin-top: 4px; text-align: center; }
 
+/* Leaflet popup styling */
+.kv-popup .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+.kv-popup .leaflet-popup-content { margin: 12px 14px; }
+.kv-popup .leaflet-popup-tip { box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+
 @media (max-width: 640px) {
   .split { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; }
   .split-left { height: 55vh; }
