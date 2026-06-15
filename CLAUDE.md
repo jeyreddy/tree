@@ -20,6 +20,21 @@ Every person is a row. Key fields:
 - `occupation` (jsonb: {role, company}), `education` (jsonb array)
 - `profiles` (jsonb: {linkedin, facebook, instagram, whatsapp})
 - `phone`, `address`, `role` (family role text), `notes`, `verified` (boolean)
+- `added_by`, `last_edited_by` (text — set from the username prompt on save)
+
+## Data model (Supabase `referrals` table)
+The KNA (Knowledge Network Analysis) layer from the spectral paper — an informal knowledge flow network overlaid on the kinship graph. "Ask Kiran about Gopal's village history" or "Swarnalatha has old photos of Balarami Reddy."
+
+- `id` (text PK), `family_id` (FK to families)
+- `source_person_id` — who KNOWS (who to contact)
+- `target_person_id` — who they know ABOUT
+- `note` — what they know ("has old photos", "knows village history", "has phone number")
+- `added_by` — username of whoever created this referral
+- `created_at` (timestamp)
+
+A referral reads as: "To find out about [target], ask [source]."
+Referrals are crowd-sourced and informal — family members add them as they discover who knows what.
+In LocalGraph, referral edges render as thin dashed blue arrows pointing from source → target.
 
 ## CRITICAL DATA RULES — NEVER VIOLATE
 1. A married-in spouse (e.g. wife who married into this family) has NO parentId in this family — her parentId belongs in HER family's tree
@@ -80,10 +95,14 @@ Never hardcode Telugu or any specific language — always read from the family's
 
 ## UI ARCHITECTURE
 - Home screen: family selector (create / pick a family)
-- Family screen: header + tabs (Tree, Export)
-- Tree tab: LEFT = SVG card chart (60%), RIGHT = detail panel (40%)
-- Detail panel shows: person info, spouse link, children list, action buttons (add father/mother/son/daughter/spouse)
-- Action buttons set gender automatically — "Add Son" creates male, "Add Daughter" creates female
+- Family screen: header (with username display) + tabs (Tree, Export)
+- Tree tab: full-width `LocalGraph` — dark radial network view, no side panel
+- Left-click a node → shifts focus to that person (graph re-centers around them)
+- Right-click a node → `DetailPopup` floating card appears near the cursor
+- DetailPopup shows: person info, spouse card, occupation, profiles, notes, verified badge, add-family buttons, referral section ("WHO KNOWS ABOUT X?"), attribution line
+- Action buttons in popup set gender automatically — Father/Mother/Son/Daughter/Spouse
+- `PersonForm` (add/edit) opens as a centered modal overlay (`position: fixed, inset: 0, zIndex 200`)
+- Username prompt bar shows at the top of the family screen until user sets their name (stored in localStorage)
 
 ## FILE STRUCTURE
 ```
@@ -96,7 +115,10 @@ C:\Tree
 ├── CLAUDE.md (this file — read every time)
 └── src/
     ├── main.jsx (entry point)
-    ├── App.jsx (entire app — will be split later)
+    ├── App.jsx (screens, state, db helpers, PersonForm, DetailPopup, AddReferralInline)
+    ├── LocalGraph.jsx (radial knowledge graph — the active tree view)
+    ├── SVGTree.jsx (SVG card tree — exports getDisplayClan; SVGTree itself is parked)
+    ├── NetworkView.jsx (force-directed network — parked, not rendered)
     ├── style.css (global styles)
     └── supabase.js (client config)
 ```
@@ -122,28 +144,41 @@ git push
 ```
 Vercel auto-deploys from main branch.
 
-## Component map (all in App.jsx)
+## Component map
 
+### src/App.jsx
 | Component / function | Purpose |
 |----------------------|---------|
-| `db` object | All Supabase queries |
+| `db` object | All Supabase queries — persons, families, referrals |
 | `App` | Root — screen state machine, shared state, business logic |
-| `SVGTree` | SVG card chart with pan/zoom, Fit button, auto-center on select |
-| `findRoots` | Root detection — excludes married-in spouses from root list |
-| `getCoupleChildren` | Gets deduplicated children from both members of a couple |
-| `layoutFamily` | Recursive bottom-up layout algorithm (no external libs) |
-| `getClanColor` | Maps clan name → color from CLAN_COLORS palette |
 | `HomeScreen` | Family list + create new family |
-| `DetailPanel` | Right-panel — selected person details + action buttons |
+| `DetailPopup` | Right-click floating card — person info, referrals, action buttons |
+| `AddReferralInline` | Inline form inside DetailPopup to add a knowledge referral |
 | `PersonForm` | Add / edit person — 4-tab form (Basic, Identity, Work, Profiles) |
 | `PersonToRow` / `RowToPerson` | Map between JS objects and DB rows |
 | `makeId` | Slug-style ID generator from name + timestamp |
 
+### src/LocalGraph.jsx (active tree view)
+| Component / function | Purpose |
+|----------------------|---------|
+| `LocalGraph` | Full-width radial graph — focus node + N-hop neighborhood |
+| `getNeighborhood` | BFS traversal returning `Map<id, hopDistance>` |
+| `radialLayout` | Structured layout: parents above, spouse right, children below, siblings left |
+| `buildLocalEdges` | Builds parent + spouse + referral edges for visible neighborhood |
+| `defaultFocus` | Picks patriarch/matriarch as starting focus (by descendant count) |
+
+### src/SVGTree.jsx (parked — exports getDisplayClan)
+| Export | Purpose |
+|--------|---------|
+| `getDisplayClan` | Used in App.jsx for clan display logic |
+| `SVGTree` | Full SVG card tree — not currently rendered, available for restoration |
+
 ## Architecture — key decisions
-- **Single-file app**: All screens, components, and DB helpers live in `src/App.jsx`. Intentional — splitting adds navigation overhead with no benefit at this size.
+- **File split**: App.jsx holds state/logic/forms; LocalGraph.jsx holds the graph view. SVGTree.jsx and NetworkView.jsx exist but are parked.
 - **Screen state machine**: `screen` state drives top-level render (`loading` → `home` → `family`). No router.
 - **No client-side caching**: Every navigation reloads from Supabase. Fine for small-data trees.
-- **SVG layout**: Custom recursive bottom-up algorithm. No d3, no dagre. Constants: CARD_W=160, CARD_H=70, COUPLE_GAP=20, SIB_GAP=30, GEN_GAP=90.
+- **LocalGraph layout**: Radial, structured (not force simulation). Constants: RING1=160, RING2=310. Hop depth 1–4, default 2.
+- **Two graph layers**: kinship edges (parent/spouse) are permanent structure; referral edges (dashed blue arrows) are the KNA overlay.
 - **Open access**: Supabase RLS policies allow public read/write. Anyone with the URL can contribute.
 
 ## Parked features
