@@ -518,6 +518,16 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                     {person.location}
                   </text>
                 )}
+                {person.birthYear && node.ring <= 2 && (
+                  <text x={node.x}
+                    y={node.y + node.r + (node.ring <= 1 && person.location ? 47 : 37)}
+                    textAnchor="middle" fontSize={7} fill="#666"
+                    style={{ userSelect: 'none', pointerEvents: 'none' }}>
+                    {person.status === 'deceased' && person.deathYear
+                      ? `${person.birthYear}–${person.deathYear}`
+                      : `b. ${person.birthYear} · ${new Date().getFullYear() - person.birthYear}y`}
+                  </text>
+                )}
               </g>
             )
           })}

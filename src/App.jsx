@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { getDisplayClan } from './SVGTree'
 import NetworkView from './NetworkView'
 import MapView from './MapView'
+import PersonForm from './PersonForm'
 
 // ── DB helpers ──
 const db = {
@@ -364,8 +365,8 @@ export default function App() {
           )}
 
           {mode && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ background: '#fff', borderRadius: 16, width: 420, maxHeight: '80vh', overflowY: 'auto', padding: 24, boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}>
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+              <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 440, maxHeight: '85vh', overflowY: 'auto', padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}>
                 <PersonForm mode={mode} persons={persons} fam={fam} onSave={savePerson} onCancel={() => setMode(null)} />
               </div>
             </div>
@@ -462,10 +463,18 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
         </div>
         {person.role && <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>{person.role}</div>}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 12, marginBottom: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 12, marginBottom: 8 }}>
           {[['Clan', person.clan || '—'], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Gen', `${person.generation}`]].map(([l, v]) => (
             <div key={l}><span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>{l}</span>{v}</div>
           ))}
+          {person.birthYear && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>Age</span>
+              {dead && person.deathYear
+                ? `${person.deathYear - person.birthYear} (${person.birthYear}–${person.deathYear})`
+                : `${new Date().getFullYear() - person.birthYear} yrs (b. ${person.birthYear})`}
+            </div>
+          )}
         </div>
 
         {spouse && (
@@ -631,86 +640,6 @@ function AddReferralInline({ targetId, persons, familyId, userName, onAdd }) {
   )
 }
 
-// ── PERSON FORM ──
-function PersonForm({ mode, persons, fam, onSave, onCancel }) {
-  const isEdit = mode.type === 'edit'
-  const existing = isEdit ? persons.find(p => p.id === mode.id) : null
-  const target = mode.parentId ? persons.find(p => p.id === mode.parentId) : null
-  const dir = mode.dir || 'child'
-  const isSp = dir === 'spouse', isAnc = dir === 'ancestor'
-  const defaultGen = isAnc ? (target ? target.generation - 1 : 0) : isSp ? (target ? target.generation : 0) : (target ? target.generation + 1 : 0)
-  const defaultGender = mode.gender || (isSp && target ? (target.gender === 'M' ? 'F' : 'M') : 'M')
-
-  const targetSpouse = (!isSp && !isAnc && target?.spouseId) ? persons.find(p => p.id === target.spouseId) : null
-  const childFather = (!isSp && !isAnc && target) ? (target.gender === 'M' ? target : (targetSpouse?.gender === 'M' ? targetSpouse : target)) : null
-  const defaultClan = childFather ? (childFather.clan || '') : (target?.clan || '')
-
-  const [f, setF] = useState(existing || {
-    name: '', clan: defaultClan, gender: defaultGender,
-    role: '', spouseId: null, location: isSp ? (target?.location || '') : '', status: isAnc ? 'deceased' : 'alive',
-    generation: defaultGen, parentId: isAnc ? (target?.parentId || null) : (isSp ? null : mode.parentId || null),
-    notes: '', verified: false, sortOrder: 0, phone: '', address: '',
-    gotra: '', languages: [], nativePlace: '',
-    occupation: { role: '', company: '' }, education: [],
-    profiles: { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
-  })
-  const [ftab, setFtab] = useState('basic')
-  const u = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }))
-  const title = isEdit ? `Edit ${f.name}` : isAnc ? '↑ Add ancestor' : isSp ? '♥ Add spouse' : '↓ Add ' + (target ? `under ${target.name}` : 'first person')
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>{title}</div>
-      <div className="form-tabs">
-        {[['basic', 'Basic'], ['identity', 'Identity'], ['work', 'Work'], ['links', 'Profiles']].map(([t, l]) => (
-          <button key={t} className={`form-tab ${ftab === t ? 'active' : ''}`} onClick={() => setFtab(t)}>{l}</button>
-        ))}
-      </div>
-
-      {ftab === 'basic' && <>
-        {[['name', 'Name *'], ['clan', 'Clan / Family name'], ['location', 'Current city'], ['role', 'Role in family'], ['phone', 'Phone'], ['notes', 'Notes']].map(([k, l]) => (
-          <div key={k} style={{ marginBottom: 10 }}>
-            <label className="label">{l}</label>
-            {k === 'notes' ? <textarea value={f[k] || ''} onChange={u(k)} rows={2} /> : <input value={f[k] || ''} onChange={u(k)} />}
-          </div>
-        ))}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-          <div><label className="label">Gender</label><select value={f.gender} onChange={u('gender')} style={{ width: 'auto' }}><option value="M">Male</option><option value="F">Female</option></select></div>
-          <div><label className="label">Status</label><select value={f.status} onChange={u('status')} style={{ width: 'auto' }}><option value="alive">Living</option><option value="deceased">Deceased</option></select></div>
-          {isEdit && <div style={{ display: 'flex', alignItems: 'end' }}><label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={f.verified} onChange={e => setF(p => ({ ...p, verified: e.target.checked }))} /> Verified</label></div>}
-        </div>
-      </>}
-
-      {ftab === 'identity' && <>
-        {[['gotra', 'Gotra', 'e.g. Bharadwaja'], ['nativePlace', 'Native village', 'e.g. Atmakur']].map(([k, l, ph]) => (
-          <div key={k} style={{ marginBottom: 10 }}><label className="label">{l}</label><input value={f[k] || ''} onChange={u(k)} placeholder={ph} /></div>
-        ))}
-        <div style={{ marginBottom: 10 }}><label className="label">Languages (comma-separated)</label>
-          <input value={(f.languages || []).join(', ')} onChange={e => setF(p => ({ ...p, languages: e.target.value.split(',').map(x => x.trim()).filter(Boolean) }))} placeholder="Telugu, English, Hindi" />
-        </div>
-      </>}
-
-      {ftab === 'work' && <>
-        {[['role', 'Job title', 'e.g. Software Engineer'], ['company', 'Company', 'e.g. Deloitte']].map(([k, l, ph]) => (
-          <div key={k} style={{ marginBottom: 10 }}><label className="label">{l}</label><input value={f.occupation?.[k] || ''} onChange={e => setF(p => ({ ...p, occupation: { ...p.occupation, [k]: e.target.value } }))} placeholder={ph} /></div>
-        ))}
-      </>}
-
-      {ftab === 'links' && <>
-        <p style={{ fontSize: 12, color: '#bbb', marginBottom: 10 }}>Paste profile links — helps connect the family network</p>
-        {[['linkedin', 'LinkedIn', 'https://linkedin.com/in/...'], ['facebook', 'Facebook', ''], ['instagram', 'Instagram', ''], ['whatsapp', 'WhatsApp', '+91...']].map(([k, l, ph]) => (
-          <div key={k} style={{ marginBottom: 10 }}><label className="label">{l}</label><input value={f.profiles?.[k] || ''} onChange={e => setF(p => ({ ...p, profiles: { ...p.profiles, [k]: e.target.value } }))} placeholder={ph} /></div>
-        ))}
-      </>}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button className="btn btn-dark" onClick={() => { if (!f.name.trim()) return alert('Name is required'); onSave(f) }}>Save</button>
-        <button className="btn btn-grey" onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  )
-}
-
 // ── Helpers ──
 function makeId(name) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now().toString(36)
@@ -728,6 +657,7 @@ function PersonToRow(p, familyId) {
     phone: p.phone || '', address: p.address || '', role: p.role || '',
     notes: p.notes || '', verified: p.verified || false, sort_order: p.sortOrder || 0,
     added_by: p.addedBy || '', last_edited_by: p.lastEditedBy || '',
+    birth_year: p.birthYear || null, death_year: p.deathYear || null,
   }
 }
 
@@ -742,5 +672,6 @@ function RowToPerson(r) {
     phone: r.phone, address: r.address, role: r.role, notes: r.notes,
     verified: r.verified, sortOrder: r.sort_order,
     addedBy: r.added_by || '', lastEditedBy: r.last_edited_by || '',
+    birthYear: r.birth_year || null, deathYear: r.death_year || null,
   }
 }

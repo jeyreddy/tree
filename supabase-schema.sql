@@ -82,3 +82,7 @@ create index idx_persons_parent on persons(parent_id);
 -- CREATE POLICY "Public delete referrals" ON referrals FOR DELETE USING (true);
 -- CREATE INDEX idx_referrals_family ON referrals(family_id);
 -- CREATE INDEX idx_referrals_target ON referrals(target_person_id);
+
+-- ── Migration 2026-06-15: birth year and death year ──
+-- ALTER TABLE persons ADD COLUMN birth_year integer;
+-- ALTER TABLE persons ADD COLUMN death_year integer;
