@@ -267,6 +267,18 @@ export default function App() {
               onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
               onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
               onFocus={id => { setSel(id); setContextMenu(null) }}
+              onForceDelete={async () => {
+                const id = contextMenu.person.id
+                setContextMenu(null)
+                for (const p of persons) {
+                  if (p.spouseId === id) await db.updatePerson(p.id, { spouse_id: null })
+                }
+                for (const p of persons) {
+                  if (p.parentId === id) await db.updatePerson(p.id, { parent_id: null })
+                }
+                await db.deletePerson(id)
+                await refresh()
+              }}
             />
           )}
 
@@ -441,7 +453,7 @@ function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLa
 }
 
 // ── DETAIL POPUP (right-click floating card) ──
-function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus }) {
+function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete }) {
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
   const dead = person.status === 'deceased'
   const popupW = 300, popupH = 460
@@ -528,6 +540,16 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
           <button className="btn btn-dark btn-sm" style={{ flex: 1 }} onClick={onEdit}>Edit</button>
           <button className="btn btn-grey btn-sm" onClick={onDelete}>Delete</button>
         </div>
+        {onForceDelete && (
+          <button
+            style={{ width: '100%', marginTop: 4, padding: '5px 0', fontSize: 11, fontWeight: 600, background: 'none', color: '#dc3545', border: '1px solid #dc3545', borderRadius: 6, cursor: 'pointer' }}
+            onClick={() => {
+              if (window.confirm('Force delete? This clears all links to this person (spouse, children) and removes them.')) {
+                onForceDelete()
+              }
+            }}
+          >Force Delete (remove all links)</button>
+        )}
       </div>
     </>
   )

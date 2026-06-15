@@ -431,22 +431,24 @@ export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) 
                   if (onContextMenu) onContextMenu(node.id, e)
                 }}
               >
+                {/* Transparent hitbox — only element that captures pointer events */}
+                <circle cx={node.x} cy={node.y} r={node.r + 5} fill="transparent" stroke="none" />
                 {isFocus && (
                   <circle cx={node.x} cy={node.y} r={node.r + 12}
                     fill="none" stroke={clanColor} strokeWidth={1.5} opacity={0.3}
-                    filter="url(#lglow)" />
+                    filter="url(#lglow)" style={{ pointerEvents: 'none' }} />
                 )}
                 {isFocus && (
                   <circle cx={node.x} cy={node.y} r={node.r + 6}
-                    fill="none" stroke={clanColor} strokeWidth={1} opacity={0.6} />
+                    fill="none" stroke={clanColor} strokeWidth={1} opacity={0.6} style={{ pointerEvents: 'none' }} />
                 )}
                 {isSelected && (
                   <circle cx={node.x} cy={node.y} r={node.r + 5}
-                    fill="none" stroke="#4A6FA5" strokeWidth={1.5} opacity={0.8} />
+                    fill="none" stroke="#4A6FA5" strokeWidth={1.5} opacity={0.8} style={{ pointerEvents: 'none' }} />
                 )}
                 {isFemale && !isDead && (
                   <circle cx={node.x} cy={node.y} r={Math.max(4, node.r - 5)}
-                    fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} />
+                    fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} style={{ pointerEvents: 'none' }} />
                 )}
                 <circle cx={node.x} cy={node.y} r={node.r}
                   fill={isDead ? 'none' : clanColor}
@@ -454,6 +456,7 @@ export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) 
                   strokeWidth={isDead ? 1.5 : 0}
                   strokeDasharray={isDead ? '4,2' : undefined}
                   opacity={0.9}
+                  style={{ pointerEvents: 'none' }}
                 />
                 {isDead && (
                   <text x={node.x} y={node.y + 4} textAnchor="middle" fontSize={node.r}
