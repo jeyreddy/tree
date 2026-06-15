@@ -34,7 +34,20 @@ const db = {
 
   async updateFamily(id, fields) {
     await supabase.from('families').update(fields).eq('id', id)
-  }
+  },
+
+  async getReferrals(familyId) {
+    const { data } = await supabase.from('referrals').select('*').eq('family_id', familyId)
+    return data || []
+  },
+
+  async addReferral(referral) {
+    await supabase.from('referrals').insert(referral)
+  },
+
+  async deleteReferral(id) {
+    await supabase.from('referrals').delete().eq('id', id)
+  },
 }
 
 const LABELS = {
@@ -59,6 +72,8 @@ export default function App() {
   const [expanded, setExpanded] = useState(new Set())
   const [tab, setTab] = useState('tree')
   const [contextMenu, setContextMenu] = useState(null)
+  const [userName, setUserName] = useState(() => localStorage.getItem('kv-username') || '')
+  const [referrals, setReferrals] = useState([])
 
   // Boot
   useEffect(() => {
@@ -66,8 +81,9 @@ export default function App() {
   }, [])
 
   const openFamily = async (f) => {
-    const rows = await db.getPersons(f.id)
+    const [rows, refs] = await Promise.all([db.getPersons(f.id), db.getReferrals(f.id)])
     setPersons(rows.map(RowToPerson))
+    setReferrals(refs)
     setFam(f); setSel(null); setMode(null); setTab('tree')
     setExpanded(new Set(rows.slice(0, 15).map(r => r.id)))
     setScreen('family')
@@ -95,6 +111,8 @@ export default function App() {
 
   const savePerson = async (form) => {
     if (mode?.type === 'add') {
+      form.addedBy = userName || 'Anonymous'
+      form.lastEditedBy = userName || 'Anonymous'
       const id = makeId(form.name)
       const dir = mode.dir
       const targetId = mode.parentId
@@ -130,6 +148,7 @@ export default function App() {
       setSel(id)
       setExpanded(prev => { const n = new Set(prev); if (form.parentId) n.add(form.parentId); n.add(id); return n })
     } else if (mode?.type === 'edit') {
+      form.lastEditedBy = userName || 'Anonymous'
       await db.upsertPerson(PersonToRow(form, fam.id))
       setSel(form.id)
     }
@@ -193,6 +212,13 @@ export default function App() {
           <div className="header-sub">{persons.length} members</div>
         </div>
         <div className="header-tabs">
+          <span
+            style={{ fontSize: 10, opacity: 0.5, cursor: 'pointer', marginRight: 6 }}
+            onClick={() => {
+              const newName = prompt('Change your name:', userName)
+              if (newName?.trim()) { setUserName(newName.trim()); localStorage.setItem('kv-username', newName.trim()) }
+            }}
+          >{userName || 'Set name'}</span>
           <select
             value={fam.language || 'english'}
             onChange={async e => {
@@ -213,6 +239,22 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      {!userName && (
+        <div style={{ background: '#FFF3CD', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, flexShrink: 0 }}>
+          <span style={{ whiteSpace: 'nowrap', color: '#856404' }}>Who are you?</span>
+          <input
+            placeholder="Your name — so family knows who added what"
+            style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', fontSize: 13 }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && e.target.value.trim()) {
+                setUserName(e.target.value.trim())
+                localStorage.setItem('kv-username', e.target.value.trim())
+              }
+            }}
+          />
+        </div>
+      )}
 
       {tab === 'tree' && (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -247,6 +289,7 @@ export default function App() {
               setSel={id => { setSel(id); setSearch('') }}
               clans={clans}
               REL={REL}
+              referrals={referrals}
               onContextMenu={(personId, event) => {
                 event.preventDefault()
                 const person = persons.find(p => p.id === personId)
@@ -267,6 +310,10 @@ export default function App() {
               onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
               onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
               onFocus={id => { setSel(id); setContextMenu(null) }}
+              familyId={fam.id}
+              userName={userName}
+              referrals={referrals}
+              setReferrals={setReferrals}
               onForceDelete={async () => {
                 const id = contextMenu.person.id
                 setContextMenu(null)
@@ -354,106 +401,8 @@ function HomeScreen({ families, onCreate, onSelect }) {
   )
 }
 
-// ── DETAIL PANEL ──
-function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLabel, getSpouseLabel, getParentLabel, onSelect, onEdit, onAdd, onDelete, onVerify, setExpanded }) {
-  if (!person) return <div style={{ padding: 30, textAlign: 'center', color: '#ccc', fontSize: 13 }}>← Pick someone from the tree</div>
-
-  const dead = person.status === 'deceased'
-  const profiles = person.profiles || {}
-  const occ = person.occupation || {}
-
-  return (
-    <div style={{ padding: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none' }}>
-            {dead ? '✝ ' : ''}{person.name}
-          </div>
-          {person.role && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{person.role}</div>}
-        </div>
-        <button className="btn btn-dark btn-sm" onClick={onEdit}>Edit</button>
-      </div>
-
-      {!person.verified && (
-        <div style={{ background: '#FFF3CD', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 12, color: '#856404', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          Unverified <button className="btn btn-sm" style={{ background: '#856404', color: '#fff' }} onClick={onVerify}>Verify ✓</button>
-        </div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', fontSize: 12, marginBottom: 10 }}>
-        {[['Clan', getDisplayClan(person, persons)], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Generation', `${person.generation}`]].map(([l, v]) => (
-          <div key={l}><div className="label" style={{ marginBottom: 2 }}>{l}</div><div style={{ color: '#444' }}>{v}</div></div>
-        ))}
-      </div>
-
-      {spouse && (
-        <div className="card card-clickable spouse-card" onClick={() => onSelect(spouse.id)}>
-          <span style={{ color: '#E8A87C', fontSize: 16 }}>♥</span>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: spouse.status === 'deceased' ? '#aaa' : '#333', textDecoration: spouse.status === 'deceased' ? 'line-through' : 'none' }}>
-              {spouse.status === 'deceased' ? '✝ ' : ''}{spouse.name}
-            </div>
-            <div style={{ fontSize: 10, color: '#C97B5D' }}>{getSpouseLabel(person)} · {spouse.location || ''}</div>
-          </div>
-        </div>
-      )}
-
-      {person.gotra && <div style={{ fontSize: 12, color: '#8B6914', marginBottom: 4 }}>{REL.gotra}: {person.gotra}</div>}
-      {person.languages?.length > 0 && <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{REL.languages}: {person.languages.join(', ')}</div>}
-      {(occ.role || occ.company) && <div className="card" style={{ cursor: 'default', padding: 10, marginBottom: 8, fontSize: 13 }}><strong>{occ.role}</strong>{occ.company ? ` @ ${occ.company}` : ''}</div>}
-
-      {Object.entries(profiles).filter(([, v]) => v).length > 0 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-          {[['linkedin', 'in', '#0077B5'], ['facebook', 'fb', '#1877F2'], ['instagram', 'ig', '#E4405F'], ['whatsapp', 'wa', '#25D366']].map(([k, l, c]) =>
-            profiles[k] ? <a key={k} href={k === 'whatsapp' ? undefined : profiles[k]} target="_blank" rel="noopener noreferrer" className="badge-profile" style={{ background: c }}>{l}</a> : null
-          )}
-        </div>
-      )}
-
-      {person.notes && <div className="card" style={{ cursor: 'default', fontSize: 13, color: '#666', lineHeight: 1.5, padding: 12 }}>{person.notes}</div>}
-
-      {parent && <div style={{ fontSize: 12, marginBottom: 6 }}>
-        <span style={{ color: '#999' }}>{getParentLabel(parent)}: </span>
-        <span style={{ color: '#4A6FA5', cursor: 'pointer' }} onClick={() => onSelect(parent.id)}>{parent.name}</span>
-      </div>}
-
-      {allKids.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <div className="label" style={{ marginBottom: 4 }}>{REL.children} ({allKids.length})</div>
-          {allKids.map(k => (
-            <div key={k.id} onClick={() => { onSelect(k.id); setExpanded(prev => { const n = new Set(prev); n.add(k.parentId); return n }) }}
-              className="card card-clickable" style={{ padding: '8px 12px', fontSize: 13, color: k.status === 'deceased' ? '#aaa' : '#4A6FA5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{k.status === 'deceased' ? '✝ ' : ''}{k.name}</span>
-              <span style={{ fontSize: 10, color: '#bbb' }}>{getChildLabel(k, person)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="actions">
-        <div style={{ fontSize: 10, color: '#bbb', fontWeight: 500, marginBottom: 4 }}>{REL.addFamily.toUpperCase()}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-          <button className="btn btn-gold" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('ancestor', 'M')}>↑ {REL.father} (Father)</button>
-          <button className="btn btn-gold" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('ancestor', 'F')}>↑ {REL.mother} (Mother)</button>
-        </div>
-        {!person.spouseId && (
-          <button className="btn btn-copper btn-full" style={{ marginTop: 6 }}
-            onClick={() => onAdd('spouse', person.gender === 'M' ? 'F' : 'M')}>
-            ♥ {person.gender === 'M' ? `${REL.wife} (Wife)` : `${REL.husband} (Husband)`}
-          </button>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
-          <button className="btn btn-green" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('child', 'M')}>↓ {REL.son} (Son)</button>
-          <button className="btn btn-green" style={{ textAlign: 'left', padding: '10px 12px' }} onClick={() => onAdd('child', 'F')}>↓ {REL.daughter} (Daughter)</button>
-        </div>
-        <button className="btn btn-grey btn-full" style={{ marginTop: 8 }} onClick={onDelete}>Delete</button>
-      </div>
-    </div>
-  )
-}
-
 // ── DETAIL POPUP (right-click floating card) ──
-function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete }) {
+function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals }) {
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
   const dead = person.status === 'deceased'
   const popupW = 300, popupH = 460
@@ -550,8 +499,101 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
             }}
           >Force Delete (remove all links)</button>
         )}
+
+        {/* Knowledge referrals */}
+        <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+          <div style={{ fontSize: 10, color: '#bbb', fontWeight: 500, marginBottom: 4 }}>
+            WHO KNOWS ABOUT {person.name.split(' ')[0].toUpperCase()}?
+          </div>
+          {referrals.filter(r => r.target_person_id === person.id).map(ref => {
+            const source = persons.find(p => p.id === ref.source_person_id)
+            return (
+              <div key={ref.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', marginBottom: 3, background: '#f0f8ff', borderRadius: 6, fontSize: 11 }}>
+                <span style={{ color: '#4A6FA5', fontWeight: 600 }}>Ask {source?.name || 'Unknown'}</span>
+                {ref.note && <span style={{ color: '#999' }}>— {ref.note}</span>}
+                <button onClick={async () => { await db.deleteReferral(ref.id); setReferrals(prev => prev.filter(r => r.id !== ref.id)) }}
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#ddd', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
+              </div>
+            )
+          })}
+          {referrals.filter(r => r.source_person_id === person.id).length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <div style={{ fontSize: 9, color: '#ccc', marginBottom: 2 }}>{person.name.split(' ')[0]} knows about:</div>
+              {referrals.filter(r => r.source_person_id === person.id).map(ref => {
+                const target = persons.find(p => p.id === ref.target_person_id)
+                return (
+                  <span key={ref.id} style={{ fontSize: 10, color: '#4A6FA5', marginRight: 6, cursor: 'pointer' }}
+                    onClick={() => { onClose(); onFocus(ref.target_person_id) }}>
+                    {target?.name || '?'}
+                  </span>
+                )
+              })}
+            </div>
+          )}
+          <AddReferralInline
+            targetId={person.id}
+            persons={persons}
+            familyId={familyId}
+            userName={userName}
+            onAdd={async (ref) => { await db.addReferral(ref); setReferrals(prev => [...prev, ref]) }}
+          />
+        </div>
+
+        {(person.addedBy || person.lastEditedBy) && (
+          <div style={{ fontSize: 9, color: '#bbb', marginTop: 8, borderTop: '1px solid #f5f5f5', paddingTop: 6 }}>
+            {person.addedBy && <span>Added by {person.addedBy}</span>}
+            {person.lastEditedBy && person.lastEditedBy !== person.addedBy && <span> · Edited by {person.lastEditedBy}</span>}
+          </div>
+        )}
       </div>
     </>
+  )
+}
+
+// ── ADD REFERRAL INLINE ──
+function AddReferralInline({ targetId, persons, familyId, userName, onAdd }) {
+  const [open, setOpen] = useState(false)
+  const [sourceId, setSourceId] = useState('')
+  const [note, setNote] = useState('')
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{ width: '100%', padding: '5px', marginTop: 4, borderRadius: 6, border: '1px dashed #e0e0e0', background: 'transparent', cursor: 'pointer', fontSize: 11, color: '#bbb' }}>
+        + Add "ask someone about this person"
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 6, padding: 8, background: '#f8f8f8', borderRadius: 8 }}>
+      <div style={{ fontSize: 10, color: '#999', marginBottom: 4 }}>Who knows about this person?</div>
+      <select value={sourceId} onChange={e => setSourceId(e.target.value)}
+        style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1px solid #e0e0e0', fontSize: 12, marginBottom: 4 }}>
+        <option value="">Select a person…</option>
+        {persons.filter(p => p.id !== targetId).map(p => (
+          <option key={p.id} value={p.id}>{p.name}{p.clan ? ` (${p.clan})` : ''}</option>
+        ))}
+      </select>
+      <input value={note} onChange={e => setNote(e.target.value)}
+        placeholder="What do they know? (has photos, knows history…)"
+        style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1px solid #e0e0e0', fontSize: 12, marginBottom: 4 }} />
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="btn btn-dark btn-sm" onClick={async () => {
+          if (!sourceId) return alert('Select who knows')
+          const ref = {
+            id: 'ref_' + Date.now().toString(36),
+            family_id: familyId,
+            source_person_id: sourceId,
+            target_person_id: targetId,
+            note: note.trim(),
+            added_by: userName || 'Anonymous',
+          }
+          await onAdd(ref)
+          setOpen(false); setSourceId(''); setNote('')
+        }}>Save</button>
+        <button className="btn btn-grey btn-sm" onClick={() => { setOpen(false); setSourceId(''); setNote('') }}>Cancel</button>
+      </div>
+    </div>
   )
 }
 
@@ -651,6 +693,7 @@ function PersonToRow(p, familyId) {
     profiles: p.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
     phone: p.phone || '', address: p.address || '', role: p.role || '',
     notes: p.notes || '', verified: p.verified || false, sort_order: p.sortOrder || 0,
+    added_by: p.addedBy || '', last_edited_by: p.lastEditedBy || '',
   }
 }
 
@@ -664,5 +707,6 @@ function RowToPerson(r) {
     profiles: r.profiles || { linkedin: '', facebook: '', instagram: '', whatsapp: '' },
     phone: r.phone, address: r.address, role: r.role, notes: r.notes,
     verified: r.verified, sortOrder: r.sort_order,
+    addedBy: r.added_by || '', lastEditedBy: r.last_edited_by || '',
   }
 }

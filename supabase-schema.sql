@@ -59,3 +59,26 @@ create index idx_persons_parent on persons(parent_id);
 -- Migration: add language column to existing databases
 -- Run this if your families table already exists:
 -- alter table families add column if not exists language text default 'english';
+
+-- ── Migration 2026-06-15: attribution + knowledge referrals ──
+-- Run these in Supabase SQL Editor if tables already exist:
+
+-- ALTER TABLE persons ADD COLUMN added_by text DEFAULT '';
+-- ALTER TABLE persons ADD COLUMN last_edited_by text DEFAULT '';
+
+-- CREATE TABLE referrals (
+--   id text PRIMARY KEY,
+--   family_id text REFERENCES families(id) ON DELETE CASCADE,
+--   source_person_id text NOT NULL,
+--   target_person_id text NOT NULL,
+--   note text DEFAULT '',
+--   added_by text DEFAULT '',
+--   created_at timestamp with time zone DEFAULT now()
+-- );
+-- ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Public read referrals" ON referrals FOR SELECT USING (true);
+-- CREATE POLICY "Public insert referrals" ON referrals FOR INSERT WITH CHECK (true);
+-- CREATE POLICY "Public update referrals" ON referrals FOR UPDATE USING (true);
+-- CREATE POLICY "Public delete referrals" ON referrals FOR DELETE USING (true);
+-- CREATE INDEX idx_referrals_family ON referrals(family_id);
+-- CREATE INDEX idx_referrals_target ON referrals(target_person_id);

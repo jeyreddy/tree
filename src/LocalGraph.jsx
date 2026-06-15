@@ -147,7 +147,7 @@ function radialLayout(focusId, neighborhood, persons) {
   return nodes
 }
 
-function buildLocalEdges(neighborhood, persons) {
+function buildLocalEdges(neighborhood, persons, referrals = []) {
   const nodeIds = new Set(neighborhood.keys())
   const edges = []
 
@@ -161,10 +161,16 @@ function buildLocalEdges(neighborhood, persons) {
     }
   })
 
+  referrals.forEach(ref => {
+    if (nodeIds.has(ref.source_person_id) && nodeIds.has(ref.target_person_id)) {
+      edges.push({ source: ref.source_person_id, target: ref.target_person_id, type: 'referral' })
+    }
+  })
+
   return edges
 }
 
-export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) {
+export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu, referrals = [] }) {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [maxHops, setMaxHops] = useState(2)
@@ -197,7 +203,7 @@ export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) 
     return getNeighborhood(effectiveFocus, persons, maxHops)
   }, [effectiveFocus, persons, maxHops])
 
-  const edges = useMemo(() => buildLocalEdges(neighborhood, persons), [neighborhood, persons])
+  const edges = useMemo(() => buildLocalEdges(neighborhood, persons, referrals), [neighborhood, persons, referrals])
 
   // Sync external sel → shift focus
   useEffect(() => {
@@ -347,6 +353,9 @@ export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) 
             <feGaussianBlur stdDeviation="4" result="blur" />
             <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
+          <marker id="ref-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#4A6FA5" opacity="0.6" />
+          </marker>
         </defs>
         <rect width="100%" height="100%" fill="#1a1a1f" />
         <rect width="100%" height="100%" fill="url(#lgrid)" />
@@ -362,6 +371,18 @@ export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) 
             const hopB = neighborhood.get(edge.target) ?? 0
             const isDeepEdge = hopA === 2 || hopB === 2
             const label = isFromFocus ? getEdgeLabel(edge) : null
+
+            if (edge.type === 'referral') {
+              const dx = b.x - a.x, dy = b.y - a.y
+              const d = Math.sqrt(dx * dx + dy * dy) || 1
+              const endX = b.x - (dx / d) * (b.r + 6)
+              const endY = b.y - (dy / d) * (b.r + 6)
+              return (
+                <line key={i} x1={a.x} y1={a.y} x2={endX} y2={endY}
+                  stroke="#4A6FA5" strokeWidth={1} strokeDasharray="4,3"
+                  opacity={0.4} markerEnd="url(#ref-arrow)" />
+              )
+            }
 
             if (edge.type === 'spouse') {
               return (
