@@ -154,9 +154,6 @@ function buildLocalEdges(neighborhood, persons) {
   persons.forEach(p => {
     if (!nodeIds.has(p.id)) return
     if (p.parentId && nodeIds.has(p.parentId)) {
-      const parentPerson = persons.find(x => x.id === p.parentId)
-      const isInLawParent = parentPerson && (!parentPerson.parentId || !persons.find(x => x.id === parentPerson.parentId))
-        && !p.parentId === parentPerson.id  // parent is a root
       edges.push({ source: p.parentId, target: p.id, type: 'parent' })
     }
     if (p.spouseId && nodeIds.has(p.spouseId) && p.id < p.spouseId) {
@@ -167,17 +164,24 @@ function buildLocalEdges(neighborhood, persons) {
   return edges
 }
 
-export function LocalGraph({ persons, sel, setSel, clans, REL }) {
+export function LocalGraph({ persons, sel, setSel, clans, REL, onContextMenu }) {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [maxHops, setMaxHops] = useState(2)
   const [focusId, setFocusId] = useState(null)
   const [displayNodes, setDisplayNodes] = useState([])
+  const [manualPositions, setManualPositions] = useState({})
+
   const svgRef = useRef(null)
   const isPanning = useRef(false)
   const lastMouse = useRef(null)
   const animFrameRef = useRef(null)
   const displayNodesRef = useRef([])
+  const finalNodesRef = useRef([])
+  const dragIdRef = useRef(null)
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
+  const dragStartPosRef = useRef(null)
+
   displayNodesRef.current = displayNodes
 
   const defaultFocusId = useMemo(() => defaultFocus(persons), [persons])
@@ -195,10 +199,15 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
 
   const edges = useMemo(() => buildLocalEdges(neighborhood, persons), [neighborhood, persons])
 
-  // Sync external sel changes → shift focus
+  // Sync external sel → shift focus
   useEffect(() => {
     if (sel && sel !== effectiveFocus) setFocusId(sel)
   }, [sel]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear manual drag positions when layout changes
+  useEffect(() => {
+    setManualPositions({})
+  }, [effectiveFocus, maxHops])
 
   // Animate to new layout whenever focus/persons/hops change
   useEffect(() => {
@@ -238,7 +247,7 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
   // Fit view after animation settles
   const fitView = () => {
     const el = svgRef.current; if (!el) return
-    const ns = displayNodesRef.current; if (!ns.length) return
+    const ns = finalNodesRef.current; if (!ns.length) return
     const rect = el.getBoundingClientRect()
     const pad = 50
     const minX = Math.min(...ns.map(n => n.x - n.r)) - pad
@@ -262,10 +271,22 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
+  // Apply manual drag overrides to display nodes
+  const finalDisplayNodes = displayNodes.map(n =>
+    manualPositions[n.id] ? { ...n, ...manualPositions[n.id] } : n
+  )
+  finalNodesRef.current = finalDisplayNodes
+
   const nodeMap = {}
-  displayNodes.forEach(n => { nodeMap[n.id] = n })
+  finalDisplayNodes.forEach(n => { nodeMap[n.id] = n })
 
   const focusPerson = persons.find(p => p.id === effectiveFocus)
+  const hasManual = Object.keys(manualPositions).length > 0
+
+  const toSVGCoords = (clientX, clientY) => {
+    const rect = svgRef.current.getBoundingClientRect()
+    return { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom }
+  }
 
   const getEdgeLabel = (edge) => {
     if (!REL || !effectiveFocus) return null
@@ -281,24 +302,42 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
     return null
   }
 
+  const handleSVGMouseDown = (e) => {
+    if (e.button !== 0) return
+    isPanning.current = true
+    lastMouse.current = { x: e.clientX, y: e.clientY }
+    e.currentTarget.style.cursor = 'grabbing'
+  }
+
+  const handleSVGMouseMove = (e) => {
+    if (dragIdRef.current) {
+      const { x: svgX, y: svgY } = toSVGCoords(e.clientX, e.clientY)
+      const newX = svgX - dragOffsetRef.current.x
+      const newY = svgY - dragOffsetRef.current.y
+      setManualPositions(prev => ({ ...prev, [dragIdRef.current]: { x: newX, y: newY } }))
+      return
+    }
+    if (!isPanning.current || !lastMouse.current) return
+    const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
+    lastMouse.current = { x: e.clientX, y: e.clientY }
+    setPan(p => ({ x: p.x + dx, y: p.y + dy }))
+  }
+
+  const handleSVGMouseUp = (e) => {
+    dragIdRef.current = null
+    isPanning.current = false
+    e.currentTarget.style.cursor = 'grab'
+  }
+
   return (
     <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
       <svg
         ref={svgRef}
         style={{ width: '100%', height: '100%', display: 'block', cursor: 'grab' }}
-        onMouseDown={e => {
-          if (e.button !== 0) return
-          isPanning.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }
-          e.currentTarget.style.cursor = 'grabbing'
-        }}
-        onMouseMove={e => {
-          if (!isPanning.current || !lastMouse.current) return
-          const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y
-          lastMouse.current = { x: e.clientX, y: e.clientY }
-          setPan(p => ({ x: p.x + dx, y: p.y + dy }))
-        }}
-        onMouseUp={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
-        onMouseLeave={e => { isPanning.current = false; e.currentTarget.style.cursor = 'grab' }}
+        onMouseDown={handleSVGMouseDown}
+        onMouseMove={handleSVGMouseMove}
+        onMouseUp={handleSVGMouseUp}
+        onMouseLeave={handleSVGMouseUp}
       >
         <defs>
           <pattern id="lgrid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -352,7 +391,7 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
           })}
 
           {/* Nodes */}
-          {displayNodes.map(node => {
+          {finalDisplayNodes.map(node => {
             const p = persons.find(x => x.id === node.id); if (!p) return null
             const isFocus = node.id === effectiveFocus
             const isSelected = sel === node.id && !isFocus
@@ -364,31 +403,51 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
 
             return (
               <g key={node.id}
-                style={{ cursor: 'pointer', opacity: isDeep ? 0.55 : 1 }}
-                onClick={e => { e.stopPropagation(); setFocusId(node.id); setSel(node.id) }}
+                style={{ cursor: 'grab', opacity: isDeep ? 0.55 : 1 }}
+                onMouseDown={e => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  dragStartPosRef.current = { x: e.clientX, y: e.clientY }
+                  const { x: svgX, y: svgY } = toSVGCoords(e.clientX, e.clientY)
+                  dragIdRef.current = node.id
+                  dragOffsetRef.current = { x: svgX - node.x, y: svgY - node.y }
+                  if (svgRef.current) svgRef.current.style.cursor = 'grabbing'
+                }}
+                onClick={e => {
+                  e.stopPropagation()
+                  if (dragStartPosRef.current) {
+                    const dx = e.clientX - dragStartPosRef.current.x
+                    const dy = e.clientY - dragStartPosRef.current.y
+                    if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
+                      setFocusId(node.id)
+                      setSel(node.id)
+                    }
+                  }
+                  dragStartPosRef.current = null
+                }}
+                onContextMenu={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (onContextMenu) onContextMenu(node.id, e)
+                }}
               >
-                {/* Focus glow ring */}
                 {isFocus && (
                   <circle cx={node.x} cy={node.y} r={node.r + 12}
                     fill="none" stroke={clanColor} strokeWidth={1.5} opacity={0.3}
                     filter="url(#lglow)" />
                 )}
-                {/* Focus bright ring */}
                 {isFocus && (
                   <circle cx={node.x} cy={node.y} r={node.r + 6}
                     fill="none" stroke={clanColor} strokeWidth={1} opacity={0.6} />
                 )}
-                {/* Selected (from detail panel) ring */}
                 {isSelected && (
                   <circle cx={node.x} cy={node.y} r={node.r + 5}
                     fill="none" stroke="#4A6FA5" strokeWidth={1.5} opacity={0.8} />
                 )}
-                {/* Female inner ring */}
                 {isFemale && !isDead && (
                   <circle cx={node.x} cy={node.y} r={Math.max(4, node.r - 5)}
                     fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} />
                 )}
-                {/* Main circle */}
                 <circle cx={node.x} cy={node.y} r={node.r}
                   fill={isDead ? 'none' : clanColor}
                   stroke={clanColor}
@@ -396,12 +455,10 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
                   strokeDasharray={isDead ? '4,2' : undefined}
                   opacity={0.9}
                 />
-                {/* Dead mark */}
                 {isDead && (
                   <text x={node.x} y={node.y + 4} textAnchor="middle" fontSize={node.r}
                     fill={clanColor} style={{ userSelect: 'none', pointerEvents: 'none' }}>×</text>
                 )}
-                {/* Name */}
                 <text x={node.x} y={node.y + node.r + 13} textAnchor="middle"
                   fontSize={isFocus ? 11 : (node.hop === 1 ? 9 : 8)}
                   fontWeight={isFocus ? 700 : 400}
@@ -410,14 +467,12 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
                   style={{ userSelect: 'none', pointerEvents: 'none' }}>
                   {nameLabel}
                 </text>
-                {/* Clan */}
                 {p.clan && (
                   <text x={node.x} y={node.y + node.r + 23} textAnchor="middle" fontSize={7}
                     fill={clanColor} opacity={0.6}
                     fontFamily="DM Sans,sans-serif"
                     style={{ userSelect: 'none', pointerEvents: 'none' }}>{p.clan}</text>
                 )}
-                {/* Location (hop 0-1 only) */}
                 {p.location && !isDeep && (
                   <text x={node.x} y={node.y + node.r + 33} textAnchor="middle" fontSize={7}
                     fill="#555" fontFamily="DM Sans,sans-serif"
@@ -433,6 +488,9 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
 
       {/* Top-right controls */}
       <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 10 }}>
+        {hasManual && (
+          <button onClick={() => setManualPositions({})} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600, background: '#7B3F3F', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Reset</button>
+        )}
         <button onClick={fitView} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 600, background: '#333', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Fit</button>
         <button onClick={() => setZoom(z => Math.min(3, z * 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#333', color: '#aaa', border: 'none', borderRadius: 6, cursor: 'pointer' }}>+</button>
         <button onClick={() => setZoom(z => Math.max(0.15, z / 1.2))} style={{ padding: '4px 8px', fontSize: 14, fontWeight: 700, background: '#333', color: '#aaa', border: 'none', borderRadius: 6, cursor: 'pointer' }}>−</button>
@@ -452,7 +510,7 @@ export function LocalGraph({ persons, sel, setSel, clans, REL }) {
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: getClanColor(focusPerson.clan, clans), flexShrink: 0 }} />
           <span style={{ fontSize: 10, color: '#888' }}>Focus</span>
           <span style={{ fontSize: 11, color: '#ddd', fontWeight: 600 }}>{focusPerson.name}</span>
-          <span style={{ fontSize: 9, color: '#444' }}>{displayNodes.length} nodes</span>
+          <span style={{ fontSize: 9, color: '#444' }}>{finalDisplayNodes.length} nodes</span>
         </div>
       )}
     </div>

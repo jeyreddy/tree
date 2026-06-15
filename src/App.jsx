@@ -58,6 +58,7 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(new Set())
   const [tab, setTab] = useState('tree')
+  const [contextMenu, setContextMenu] = useState(null)
 
   // Boot
   useEffect(() => {
@@ -214,57 +215,68 @@ export default function App() {
       </div>
 
       {tab === 'tree' && (
-        <div className="split" style={{ flex: 1, minHeight: 0, gridTemplateColumns: '1fr 300px' }}>
-          {/* Left: chart or network */}
-          <div className="split-left" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, padding: '7px 10px' }} />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search people…" style={{ marginBottom: 0, padding: '7px 10px' }} />
+          </div>
+
+          {persons.length === 0 && !search ? (
+            <div className="empty" style={{ flex: 1 }}>
+              <div className="empty-icon">🌱</div>
+              <div className="empty-title">Start your tree</div>
+              <div className="empty-sub">Add the first person — yourself or the oldest ancestor you know</div>
+              <button className="btn btn-dark" onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}>+ Add first person</button>
             </div>
+          ) : search ? (
+            <div style={{ overflowY: 'auto', flex: 1, padding: '4px 12px 12px' }}>
+              {filtered.map(p => (
+                <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
+                  onClick={() => { setSel(p.id); setSearch('') }}>
+                  <span style={{ width: 14 }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>
+                    {(p.status === 'deceased' ? '✝ ' : '') + p.name}{p.clan ? ` (${p.clan})` : ''}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.location || ''}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <LocalGraph
+              persons={persons}
+              sel={sel}
+              setSel={id => { setSel(id); setSearch('') }}
+              clans={clans}
+              REL={REL}
+              onContextMenu={(personId, event) => {
+                event.preventDefault()
+                const person = persons.find(p => p.id === personId)
+                if (person) setContextMenu({ person, position: { x: event.clientX, y: event.clientY } })
+              }}
+            />
+          )}
 
-            {persons.length === 0 && !search ? (
-              <div className="empty" style={{ flex: 1 }}>
-                <div className="empty-icon">🌱</div>
-                <div className="empty-title">Start your tree</div>
-                <div className="empty-sub">Add the first person — yourself or the oldest ancestor you know</div>
-                <button className="btn btn-dark" onClick={() => setMode({ type: 'add', dir: 'child', parentId: null })}>+ Add first person</button>
-              </div>
-            ) : search ? (
-              <div style={{ overflowY: 'auto', flex: 1, padding: '4px 12px 12px' }}>
-                {filtered.map(p => (
-                  <div key={p.id} className={`tree-node ${sel === p.id ? 'selected' : ''} ${p.status === 'deceased' ? 'deceased' : ''}`}
-                    onClick={() => { setSel(p.id); setSearch('') }}>
-                    <span style={{ width: 14 }} />
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>
-                      {(p.status === 'deceased' ? '✝ ' : '') + p.name}{p.clan ? ` (${p.clan})` : ''}
-                    </span>
-                    <span style={{ fontSize: 10, color: '#ccc', marginLeft: 'auto' }}>{p.location || ''}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <LocalGraph
-                persons={persons}
-                sel={sel}
-                setSel={id => { setSel(id); setSearch('') }}
-                clans={clans}
-                REL={REL}
-              />
-            )}
-          </div>
+          {contextMenu && (
+            <DetailPopup
+              person={contextMenu.person}
+              position={contextMenu.position}
+              persons={persons}
+              REL={REL}
+              onClose={() => setContextMenu(null)}
+              onEdit={() => { const id = contextMenu.person.id; setContextMenu(null); setMode({ type: 'edit', id }) }}
+              onAdd={(dir, gender) => { const pid = contextMenu.person.id; setContextMenu(null); setMode({ type: 'add', dir, parentId: pid, gender }) }}
+              onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
+              onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
+              onFocus={id => { setSel(id); setContextMenu(null) }}
+            />
+          )}
 
-          {/* Right: detail / form */}
-          <div className="split-right">
-            {mode
-              ? <PersonForm mode={mode} persons={persons} fam={fam} onSave={savePerson} onCancel={() => setMode(null)} />
-              : <DetailPanel person={selected} spouse={spouse} parent={parent} allKids={allKids} persons={persons}
-                  REL={REL} getChildLabel={getChildLabel} getSpouseLabel={getSpouseLabel} getParentLabel={getParentLabel}
-                  onSelect={setSel} onEdit={() => setMode({ type: 'edit', id: selected.id })}
-                  onAdd={(dir, gender) => setMode({ type: 'add', dir, parentId: selected?.id, gender })}
-                  onDelete={() => deletePerson(selected.id)}
-                  onVerify={() => toggleVerified(selected.id)}
-                  setExpanded={setExpanded} />
-            }
-          </div>
+          {mode && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ background: '#fff', borderRadius: 16, width: 420, maxHeight: '80vh', overflowY: 'auto', padding: 24, boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}>
+                <PersonForm mode={mode} persons={persons} fam={fam} onSave={savePerson} onCancel={() => setMode(null)} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -425,6 +437,99 @@ function DetailPanel({ person, spouse, parent, allKids, persons, REL, getChildLa
         <button className="btn btn-grey btn-full" style={{ marginTop: 8 }} onClick={onDelete}>Delete</button>
       </div>
     </div>
+  )
+}
+
+// ── DETAIL POPUP (right-click floating card) ──
+function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus }) {
+  const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
+  const dead = person.status === 'deceased'
+  const popupW = 300, popupH = 460
+  let left = position.x + 12
+  let top = position.y - 16
+  if (left + popupW > window.innerWidth - 8) left = position.x - popupW - 12
+  if (top + popupH > window.innerHeight - 8) top = window.innerHeight - popupH - 8
+  if (top < 8) top = 8
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+      <div style={{
+        position: 'fixed', left, top, width: popupW, maxHeight: popupH,
+        overflowY: 'auto', background: '#fff', borderRadius: 12,
+        boxShadow: '0 8px 30px rgba(0,0,0,0.2)', border: '1px solid #e8e8e8',
+        zIndex: 100, padding: 16, fontFamily: "'DM Sans', sans-serif",
+      }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 8, right: 10, background: 'none', border: 'none', fontSize: 20, color: '#ccc', cursor: 'pointer', lineHeight: 1 }}>×</button>
+
+        <div style={{ fontSize: 17, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none', marginBottom: 2, paddingRight: 24 }}>
+          {dead ? '✝ ' : ''}{person.name}
+        </div>
+        {person.role && <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>{person.role}</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 12, marginBottom: 10 }}>
+          {[['Clan', person.clan || '—'], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Gen', `${person.generation}`]].map(([l, v]) => (
+            <div key={l}><span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>{l}</span>{v}</div>
+          ))}
+        </div>
+
+        {spouse && (
+          <div onClick={() => { onClose(); setTimeout(() => onFocus(spouse.id), 50) }}
+            style={{ background: '#fdf8f2', borderRadius: 8, padding: '8px 10px', marginBottom: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: '#E8A87C' }}>♥</span>
+            <span style={{ color: spouse.status === 'deceased' ? '#aaa' : '#333', textDecoration: spouse.status === 'deceased' ? 'line-through' : 'none' }}>{spouse.name}</span>
+            {spouse.clan && <span style={{ color: '#bbb', fontSize: 10 }}>{spouse.clan}</span>}
+          </div>
+        )}
+
+        {(person.occupation?.role || person.occupation?.company) && (
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>
+            {person.occupation.role}{person.occupation.company ? ` @ ${person.occupation.company}` : ''}
+          </div>
+        )}
+
+        {person.profiles && Object.entries(person.profiles).filter(([, v]) => v).length > 0 && (
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+            {[['linkedin', 'in', '#0077B5'], ['facebook', 'fb', '#1877F2'], ['instagram', 'ig', '#E4405F'], ['whatsapp', 'wa', '#25D366']].map(([k, l, c]) =>
+              person.profiles[k] ? <a key={k} href={k === 'whatsapp' ? undefined : person.profiles[k]} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: c, padding: '2px 6px', borderRadius: 3, textDecoration: 'none' }}>{l}</a> : null
+            )}
+          </div>
+        )}
+
+        {person.notes && (
+          <div style={{ fontSize: 11, color: '#888', background: '#f8f8f8', borderRadius: 6, padding: 8, marginBottom: 8, lineHeight: 1.4 }}>{person.notes}</div>
+        )}
+
+        {!person.verified && (
+          <div style={{ background: '#FFF3CD', borderRadius: 6, padding: '6px 10px', marginBottom: 8, fontSize: 11, color: '#856404', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Unverified
+            <button onClick={onVerify} style={{ background: '#856404', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 10, cursor: 'pointer' }}>Verify ✓</button>
+          </div>
+        )}
+
+        <div style={{ fontSize: 10, color: '#bbb', marginBottom: 5, fontWeight: 500, letterSpacing: 0.5 }}>{(REL?.addFamily || 'ADD FAMILY').toUpperCase()}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 4 }}>
+          <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
+          <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
+        </div>
+        {!person.spouseId && (
+          <button className="btn btn-copper btn-sm btn-full" style={{ marginBottom: 4 }}
+            onClick={() => onAdd('spouse', person.gender === 'M' ? 'F' : 'M')}>
+            ♥ {person.gender === 'M' ? (REL?.wife || 'Wife') : (REL?.husband || 'Husband')}
+          </button>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
+          <button className="btn btn-green btn-sm" onClick={() => onAdd('child', 'M')}>↓ {REL?.son || 'Son'}</button>
+          <button className="btn btn-green btn-sm" onClick={() => onAdd('child', 'F')}>↓ {REL?.daughter || 'Daughter'}</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className="btn btn-dark btn-sm" style={{ flex: 1 }} onClick={onEdit}>Edit</button>
+          <button className="btn btn-grey btn-sm" onClick={onDelete}>Delete</button>
+        </div>
+      </div>
+    </>
   )
 }
 
