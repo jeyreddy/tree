@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import { getDisplayClan } from './SVGTree'
-import { LocalGraph } from './LocalGraph'
+import NetworkView from './NetworkView'
 import MapView from './MapView'
 
 // ── DB helpers ──
@@ -106,7 +106,6 @@ export default function App() {
   }, [fam])
 
   const getKids = (id) => persons.filter(p => p.parentId === id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
-  const clans = [...new Set(persons.map(p => p.clan).filter(Boolean))].sort()
   const selected = sel ? persons.find(p => p.id === sel) : null
   const spouse = selected?.spouseId ? persons.find(p => p.id === selected.spouseId) : null
   const parent = selected?.parentId ? persons.find(p => p.id === selected.parentId) : null
@@ -304,12 +303,10 @@ export default function App() {
                   onContextMenu={handleContextMenu}
                 />
               ) : (
-                <LocalGraph
+                <NetworkView
                   persons={persons}
                   sel={sel}
                   setSel={id => { setSel(id); setSearch('') }}
-                  clans={clans}
-                  REL={REL}
                   referrals={referrals}
                   onContextMenu={handleContextMenu}
                 />

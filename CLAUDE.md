@@ -87,6 +87,33 @@ To find true roots:
 - Deceased: dashed border, strikethrough name
 - Selected: blue border/glow
 
+## CONCENTRIC RINGS RENDERING (NetworkView)
+
+The active graph view. Selected person sits at center; family radiates outward by social distance.
+
+### Ring assignments
+- **Ring 0** (center): the focus person
+- **Ring 1** (r=130): spouse, parents, children
+- **Ring 2** (r=260): siblings + their spouses/children, grandparents, grandchildren, children's spouses
+- **Ring 3** (r=380): in-law parents, spouse's siblings, children's in-law parents
+- **Ring 4** (r=490): everyone else in the family data
+
+### Node sizing by ring
+- Ring 0: r=30, Ring 1 parents: r=24, Ring 1 spouse: r=26, Ring 1 children: r=22
+- Ring 2: r=18, Ring 3: r=15, Ring 4: r=12
+
+### Navigation
+- Left-click any node → that person becomes the new Ring 0 focus (rings re-computed)
+- Breadcrumb trail (top-left overlay) shows navigation history; click any crumb to go back
+- External `sel` change (from search results) also moves focus
+
+### Visual conventions
+- Deceased: transparent fill, dashed stroke, × mark
+- Female: inner circle indicator
+- Unverified: yellow dot at top-right of node
+- Focus: pulsing outer glow ring (SMIL animate)
+- Ring boundaries: dashed circles with label at top-right arc
+
 ## LANGUAGE LABELS
 Relationship labels are configurable per family (stored in families.language column).
 Available: English, Telugu, Hindi, Tamil, Kannada.
@@ -96,8 +123,8 @@ Never hardcode Telugu or any specific language — always read from the family's
 ## UI ARCHITECTURE
 - Home screen: family selector (create / pick a family)
 - Family screen: header (with username display) + tabs (Tree, Export)
-- Tree tab: full-width `LocalGraph` — dark radial network view, no side panel
-- Left-click a node → shifts focus to that person (graph re-centers around them)
+- Tree tab: floating search bar + Graph/Map toggle; defaults to `NetworkView` (concentric rings)
+- Left-click a node → re-centers the rings around that person (navigateTo)
 - Right-click a node → `DetailPopup` floating card appears near the cursor
 - DetailPopup shows: person info, spouse card, occupation, profiles, notes, verified badge, add-family buttons, referral section ("WHO KNOWS ABOUT X?"), attribution line
 - Action buttons in popup set gender automatically — Father/Mother/Son/Daughter/Spouse
@@ -116,9 +143,9 @@ C:\Tree
 └── src/
     ├── main.jsx (entry point)
     ├── App.jsx (screens, state, db helpers, PersonForm, DetailPopup, AddReferralInline)
-    ├── LocalGraph.jsx (radial knowledge graph — the active tree view)
+    ├── NetworkView.jsx (concentric rings view — active Graph view)
+    ├── LocalGraph.jsx (radial hop graph — parked, not rendered)
     ├── SVGTree.jsx (SVG card tree — exports getDisplayClan; SVGTree itself is parked)
-    ├── NetworkView.jsx (force-directed network — parked, not rendered)
     ├── style.css (global styles)
     └── supabase.js (client config)
 ```
@@ -158,14 +185,19 @@ Vercel auto-deploys from main branch.
 | `PersonToRow` / `RowToPerson` | Map between JS objects and DB rows |
 | `makeId` | Slug-style ID generator from name + timestamp |
 
-### src/LocalGraph.jsx (active tree view)
+### src/NetworkView.jsx (active Graph view — concentric rings)
 | Component / function | Purpose |
 |----------------------|---------|
-| `LocalGraph` | Full-width radial graph — focus node + N-hop neighborhood |
-| `getNeighborhood` | BFS traversal returning `Map<id, hopDistance>` |
-| `radialLayout` | Structured layout: parents above, spouse right, children below, siblings left |
-| `buildLocalEdges` | Builds parent + spouse + referral edges for visible neighborhood |
-| `defaultFocus` | Picks patriarch/matriarch as starting focus (by descendant count) |
+| `NetworkView` | Concentric rings centered on selected person; click navigates focus |
+| `assignRings` | Classifies every person into rings 0–4 based on social distance from focus |
+| `positionNodes` | Places ring-0 at center, ring-1 structured (parents top/spouse right/children bottom), rings 2–4 anchored near closest inner-ring relative |
+| `getClanColor` | Maps clan → CLAN_COLORS palette (same palette as MapView) |
+| `hash01` | Deterministic pseudo-random 0–1 for stable layout without Math.random() |
+
+### src/LocalGraph.jsx (parked — radial hop graph)
+| Component / function | Purpose |
+|----------------------|---------|
+| `LocalGraph` | N-hop BFS radial graph around focus node (not rendered; available to restore) |
 
 ### src/SVGTree.jsx (parked — exports getDisplayClan)
 | Export | Purpose |
@@ -174,11 +206,12 @@ Vercel auto-deploys from main branch.
 | `SVGTree` | Full SVG card tree — not currently rendered, available for restoration |
 
 ## Architecture — key decisions
-- **File split**: App.jsx holds state/logic/forms; LocalGraph.jsx holds the graph view. SVGTree.jsx and NetworkView.jsx exist but are parked.
+- **File split**: App.jsx holds state/logic/forms; NetworkView.jsx holds the active graph; MapView.jsx holds the map. LocalGraph.jsx and SVGTree.jsx are parked.
 - **Screen state machine**: `screen` state drives top-level render (`loading` → `home` → `family`). No router.
 - **No client-side caching**: Every navigation reloads from Supabase. Fine for small-data trees.
-- **LocalGraph layout**: Radial, structured (not force simulation). Constants: RING1=160, RING2=310. Hop depth 1–4, default 2.
-- **Two graph layers**: kinship edges (parent/spouse) are permanent structure; referral edges (dashed blue arrows) are the KNA overlay.
+- **NetworkView layout**: Concentric rings, deterministic (no force simulation). Ring radii: 0=center, 130, 260, 380, 490. Focus person at center; rings computed fresh on each focusId change.
+- **Two graph layers**: kinship edges (parent/spouse) are permanent structure; referral edges (dashed blue arrows) are the KNA overlay. Both rendered in NetworkView and LocalGraph.
+- **View toggle**: `view` state in App ('graph' | 'map'). Graph = NetworkView, Map = MapView. Both share the same floating search bar and DetailPopup.
 - **Open access**: Supabase RLS policies allow public read/write. Anyone with the URL can contribute.
 
 ## Parked features
@@ -186,6 +219,10 @@ Vercel auto-deploys from main branch.
 ### Login (Supabase magic link)
 - **Status**: Built and reverted on 2026-06-11. Re-enable after other features are stable.
 - **How to restore**: See `.claude/commands/enable-login.md` for the exact code to add back.
+
+### LocalGraph (radial hop graph)
+- **Status**: Replaced by NetworkView (concentric rings) on 2026-06-15. File preserved at src/LocalGraph.jsx.
+- **How to restore**: In App.jsx, import `{ LocalGraph }` and swap NetworkView for LocalGraph in the tree tab. Pass `clans`, `REL`, `referrals`, `onContextMenu` props.
 
 ## Code conventions
 - No comments unless the WHY is non-obvious
