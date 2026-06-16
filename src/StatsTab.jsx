@@ -105,11 +105,21 @@ function fallbackCopy(text) {
   alert('Copied! Paste in WhatsApp.')
 }
 
-export default function StatsTab({ persons, fam }) {
+export default function StatsTab({ persons, fam, views = [], disputes = [] }) {
   const { score: completenessScore, missing: missingData } = computeCompleteness(persons)
   const contributors = computeContributors(persons)
   const branchStats = computeBranchStats(persons)
   const recentActivity = computeRecentActivity(persons)
+
+  const trustedCount = persons.filter(p => {
+    const unique = [...new Set(views.filter(v => v.person_id === p.id).map(v => v.viewed_by))].length
+    return unique >= 3
+  }).length
+  const seenCount = persons.filter(p => {
+    const unique = [...new Set(views.filter(v => v.person_id === p.id).map(v => v.viewed_by))].length
+    return unique >= 1 && unique < 3
+  }).length
+  const openDisputes = disputes.filter(d => d.status === 'open')
 
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
@@ -141,6 +151,41 @@ export default function StatsTab({ persons, fam }) {
             🌳 Family tree is complete! Amazing work.
           </div>
         )}
+      </div>
+
+      {/* ── DATA TRUST ── */}
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Data Trust</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+          <div style={{ background: '#f0fff4', borderRadius: 10, padding: '12px 8px', textAlign: 'center', border: '1px solid #d4edda' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#5B7553' }}>{trustedCount}</div>
+            <div style={{ fontSize: 10, color: '#5B7553', fontWeight: 600 }}>Trusted</div>
+            <div style={{ fontSize: 9, color: '#bbb' }}>3+ reviewers</div>
+          </div>
+          <div style={{ background: '#fffbf0', borderRadius: 10, padding: '12px 8px', textAlign: 'center', border: '1px solid #ffe9a0' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#C4A35A' }}>{seenCount}</div>
+            <div style={{ fontSize: 10, color: '#C4A35A', fontWeight: 600 }}>Seen</div>
+            <div style={{ fontSize: 9, color: '#bbb' }}>1–2 reviewers</div>
+          </div>
+          <div style={{ background: openDisputes.length > 0 ? '#fff5f5' : '#fafafa', borderRadius: 10, padding: '12px 8px', textAlign: 'center', border: `1px solid ${openDisputes.length > 0 ? '#fdd' : '#f0f0f0'}` }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: openDisputes.length > 0 ? '#dc3545' : '#bbb' }}>{openDisputes.length}</div>
+            <div style={{ fontSize: 10, color: openDisputes.length > 0 ? '#dc3545' : '#bbb', fontWeight: 600 }}>Disputes</div>
+            <div style={{ fontSize: 9, color: '#bbb' }}>open flags</div>
+          </div>
+        </div>
+        {openDisputes.length > 0 && openDisputes.map(d => {
+          const p = persons.find(x => x.id === d.person_id)
+          return (
+            <div key={d.id} style={{ padding: '8px 10px', marginBottom: 6, background: '#fff5f5', borderRadius: 8, border: '1px solid #fdd', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <strong>{p?.name || 'Unknown'}</strong>
+                <span style={{ fontSize: 10, color: '#bbb' }}>by {d.raised_by}</span>
+              </div>
+              <div style={{ color: '#dc3545', fontSize: 11 }}>{d.field_name} · {d.reason}</div>
+              {d.suggested_value && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>Should be: {d.suggested_value}</div>}
+            </div>
+          )
+        })}
       </div>
 
       {/* ── CONTRIBUTOR LEADERBOARD ── */}
@@ -217,6 +262,7 @@ export default function StatsTab({ persons, fam }) {
           const text =
             `🌳 ${fam?.name || 'Family'} Tree — ${completenessScore}% complete!\n\n` +
             `${persons.length} family members documented.\n` +
+            `Trust: ${trustedCount} entries trusted (3+ reviewers)${openDisputes.length > 0 ? `, ${openDisputes.length} disputes open` : ''}.\n` +
             (missingData.length > 0
               ? `\nStill needed:\n${missingData.slice(0, 4).map(m => `${m.icon} ${m.count} ${m.label}`).join('\n')}\n`
               : '\n✅ All data complete!\n') +

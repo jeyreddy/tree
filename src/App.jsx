@@ -5,6 +5,7 @@ import NetworkView from './NetworkView'
 import MapView from './MapView'
 import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
+import { TrustIndicator, TrustSummary, FlagItForm } from './TrustIndicator'
 
 // ── DB helpers ──
 const db = {
@@ -51,6 +52,28 @@ const db = {
   async deleteReferral(id) {
     await supabase.from('referrals').delete().eq('id', id)
   },
+
+  async getViews(familyId) {
+    const { data } = await supabase.from('person_views').select('*').eq('family_id', familyId)
+    return data || []
+  },
+
+  async addView(view) {
+    await supabase.from('person_views').insert(view)
+  },
+
+  async getDisputes(familyId) {
+    const { data } = await supabase.from('disputes').select('*').eq('family_id', familyId).order('created_at', { ascending: false })
+    return data || []
+  },
+
+  async addDispute(dispute) {
+    await supabase.from('disputes').insert(dispute)
+  },
+
+  async resolveDispute(id, resolvedBy, note) {
+    await supabase.from('disputes').update({ status: 'resolved', resolved_by: resolvedBy, resolution_note: note, resolved_at: new Date().toISOString() }).eq('id', id)
+  },
 }
 
 const LABELS = {
@@ -78,6 +101,8 @@ export default function App() {
   const [userName, setUserName] = useState(() => localStorage.getItem('kv-username') || '')
   const [referrals, setReferrals] = useState([])
   const [view, setView] = useState('graph')
+  const [views, setViews] = useState([])
+  const [disputes, setDisputes] = useState([])
 
   // Boot
   useEffect(() => {
@@ -85,9 +110,11 @@ export default function App() {
   }, [])
 
   const openFamily = async (f) => {
-    const [rows, refs] = await Promise.all([db.getPersons(f.id), db.getReferrals(f.id)])
+    const [rows, refs, vws, disps] = await Promise.all([db.getPersons(f.id), db.getReferrals(f.id), db.getViews(f.id), db.getDisputes(f.id)])
     setPersons(rows.map(RowToPerson))
     setReferrals(refs)
+    setViews(vws)
+    setDisputes(disps)
     setFam(f); setSel(null); setMode(null); setTab('tree')
     setExpanded(new Set(rows.slice(0, 15).map(r => r.id)))
     setScreen('family')
@@ -316,6 +343,8 @@ export default function App() {
                   setSel={id => { setSel(id); setSearch('') }}
                   referrals={referrals}
                   onContextMenu={handleContextMenu}
+                  views={views}
+                  disputes={disputes}
                 />
               )}
 
@@ -355,6 +384,23 @@ export default function App() {
               userName={userName}
               referrals={referrals}
               setReferrals={setReferrals}
+              views={views}
+              disputes={disputes}
+              historianName={fam?.historian_name || ''}
+              onAddDispute={async (d) => { await db.addDispute(d); setDisputes(prev => [d, ...prev]) }}
+              onResolveDispute={async (id, resolvedBy, note) => {
+                await db.resolveDispute(id, resolvedBy, note)
+                setDisputes(prev => prev.map(d => d.id === id ? { ...d, status: 'resolved', resolved_by: resolvedBy, resolution_note: note, resolved_at: new Date().toISOString() } : d))
+              }}
+              onAutoView={async (personId) => {
+                if (!userName) return
+                const alreadyViewed = views.some(v => v.person_id === personId && v.viewed_by === userName)
+                if (!alreadyViewed) {
+                  const view = { id: 'view_' + Date.now().toString(36), family_id: fam.id, person_id: personId, viewed_by: userName }
+                  await db.addView(view)
+                  setViews(prev => [...prev, view])
+                }
+              }}
               onForceDelete={async () => {
                 const id = contextMenu.person.id
                 setContextMenu(null)
@@ -382,7 +428,7 @@ export default function App() {
 
       {tab === 'stats' && (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          <StatsTab persons={persons} fam={fam} />
+          <StatsTab persons={persons} fam={fam} views={views} disputes={disputes} />
         </div>
       )}
 
@@ -449,10 +495,11 @@ function HomeScreen({ families, onCreate, onSelect }) {
 }
 
 // ── DETAIL POPUP (right-click floating card) ──
-function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals }) {
+function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals, views = [], disputes = [], historianName = '', onAddDispute, onResolveDispute, onAutoView }) {
+  useEffect(() => { if (onAutoView && person?.id) onAutoView(person.id) }, [person?.id])
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
   const dead = person.status === 'deceased'
-  const popupW = 300, popupH = 460
+  const popupW = 300, popupH = 580
   let left = position.x + 12
   let top = position.y - 16
   if (left + popupW > window.innerWidth - 8) left = position.x - popupW - 12
@@ -471,17 +518,17 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
         <button onClick={onClose} style={{ position: 'absolute', top: 8, right: 10, background: 'none', border: 'none', fontSize: 20, color: '#ccc', cursor: 'pointer', lineHeight: 1 }}>×</button>
 
         <div style={{ fontSize: 17, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none', marginBottom: 2, paddingRight: 24 }}>
-          {dead ? '✝ ' : ''}{person.name}
+          {dead ? '✝ ' : ''}{person.name}<TrustIndicator personId={person.id} fieldName="name" views={views} disputes={disputes} />
         </div>
         {person.role && <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>{person.role}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 12, marginBottom: 8 }}>
-          {[['Clan', person.clan || '—'], ['Location', person.location || '—'], ['Status', dead ? 'Deceased' : 'Living'], ['Gen', `${person.generation}`]].map(([l, v]) => (
-            <div key={l}><span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>{l}</span>{v}</div>
+          {[['Clan', person.clan || '—', 'clan'], ['Location', person.location || '—', 'location'], ['Status', dead ? 'Deceased' : 'Living', 'status'], ['Gen', `${person.generation}`, null]].map(([l, v, f]) => (
+            <div key={l}><span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>{l}{f && <TrustIndicator personId={person.id} fieldName={f} views={views} disputes={disputes} />}</span>{v}</div>
           ))}
           {person.birthYear && (
             <div style={{ gridColumn: '1 / -1' }}>
-              <span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>Age</span>
+              <span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>Age<TrustIndicator personId={person.id} fieldName="birth_year" views={views} disputes={disputes} /></span>
               {dead && person.deathYear
                 ? `${person.deathYear - person.birthYear} (${person.birthYear}–${person.deathYear})`
                 : `${new Date().getFullYear() - person.birthYear} yrs (b. ${person.birthYear})`}
@@ -500,6 +547,7 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
 
         {(person.occupation?.role || person.occupation?.company) && (
           <div style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>
+            <span style={{ display: 'block', color: '#bbb', fontSize: 10 }}>Occupation<TrustIndicator personId={person.id} fieldName="occupation" views={views} disputes={disputes} /></span>
             {person.occupation.role}{person.occupation.company ? ` @ ${person.occupation.company}` : ''}
           </div>
         )}
@@ -554,6 +602,9 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
             }}
           >Force Delete (remove all links)</button>
         )}
+
+        <TrustSummary person={person} views={views} disputes={disputes} userName={userName} historianName={historianName} onResolveDispute={onResolveDispute} />
+        <FlagItForm person={person} familyId={familyId} userName={userName} onAdd={onAddDispute} />
 
         {/* Knowledge referrals */}
         <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>

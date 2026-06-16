@@ -90,3 +90,33 @@ create index idx_persons_parent on persons(parent_id);
 -- ── Migration 2026-06-15: family historian ──
 -- ALTER TABLE families ADD COLUMN historian text DEFAULT '';
 -- ALTER TABLE families ADD COLUMN historian_name text DEFAULT '';
+
+-- ── Migration 2026-06-16: Trust Engine ──
+-- CREATE TABLE person_views (
+--   id text PRIMARY KEY,
+--   family_id text REFERENCES families(id) ON DELETE CASCADE,
+--   person_id text NOT NULL,
+--   viewed_by text NOT NULL,
+--   viewed_at timestamp with time zone DEFAULT now()
+-- );
+-- CREATE TABLE disputes (
+--   id text PRIMARY KEY,
+--   family_id text REFERENCES families(id) ON DELETE CASCADE,
+--   person_id text NOT NULL,
+--   field_name text NOT NULL,
+--   current_value text DEFAULT '',
+--   suggested_value text DEFAULT '',
+--   reason text DEFAULT '',
+--   raised_by text NOT NULL,
+--   status text DEFAULT 'open',
+--   resolved_by text DEFAULT '',
+--   resolution_note text DEFAULT '',
+--   created_at timestamp with time zone DEFAULT now(),
+--   resolved_at timestamp with time zone
+-- );
+-- ALTER TABLE person_views ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE disputes ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Public all person_views" ON person_views FOR ALL USING (true) WITH CHECK (true);
+-- CREATE POLICY "Public all disputes" ON disputes FOR ALL USING (true) WITH CHECK (true);
+-- CREATE INDEX idx_views_person ON person_views(person_id);
+-- CREATE INDEX idx_disputes_person ON disputes(person_id);

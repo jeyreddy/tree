@@ -230,7 +230,7 @@ function positionNodes(focusId, assignments, persons, cx, cy) {
   return nodes
 }
 
-export default function NetworkView({ persons, sel, setSel, onContextMenu, referrals = [] }) {
+export default function NetworkView({ persons, sel, setSel, onContextMenu, referrals = [], views = [], disputes = [] }) {
   const svgRef = useRef(null)
   const [focusId, setFocusId] = useState(null)
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 })
@@ -498,24 +498,28 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                     r={3.5} fill="#FFC107" pointerEvents="none" />
                 )}
                 {node.ring <= 2 && (() => {
-                  let filled = 0
-                  if (person.location) filled++
-                  if (person.birthYear) filled++
-                  if (person.phone) filled++
-                  if (person.verified) filled++
-                  if (person.occupation?.role || person.occupation?.company) filled++
-                  const pct = filled / 5
-                  if (pct >= 1) return null
+                  const pViews = views.filter(v => v.person_id === node.id)
+                  const uniqueViewers = [...new Set(pViews.map(v => v.viewed_by))].length
+                  const hasDispute = disputes.some(d => d.person_id === node.id && d.status === 'open')
                   const arcR = node.r + 3
-                  const circumference = 2 * Math.PI * arcR
-                  return (
+                  if (hasDispute) return (
                     <circle cx={node.x} cy={node.y} r={arcR}
-                      fill="none" stroke="#5B7553" strokeWidth={2}
-                      strokeDasharray={`${circumference * pct} ${circumference * (1 - pct)}`}
-                      strokeDashoffset={circumference * 0.25}
-                      opacity={0.4} pointerEvents="none"
-                      transform={`rotate(-90, ${node.x}, ${node.y})`} />
+                      fill="none" stroke="#dc3545" strokeWidth={2.5}
+                      opacity={0.75} pointerEvents="none">
+                      <animate attributeName="opacity" values="0.75;0.2;0.75" dur="1.5s" repeatCount="indefinite" />
+                    </circle>
                   )
+                  if (uniqueViewers >= 3) return (
+                    <circle cx={node.x} cy={node.y} r={arcR}
+                      fill="none" stroke="#5B7553" strokeWidth={Math.min(uniqueViewers * 0.6, 3)}
+                      opacity={0.55} pointerEvents="none" />
+                  )
+                  if (uniqueViewers >= 1) return (
+                    <circle cx={node.x} cy={node.y} r={arcR}
+                      fill="none" stroke="#C4A35A" strokeWidth={1.5}
+                      opacity={0.35} pointerEvents="none" />
+                  )
+                  return null
                 })()}
                 <text x={node.x} y={node.y + node.r + 14}
                   textAnchor="middle" fontSize={isFocus ? 12 : 10}
