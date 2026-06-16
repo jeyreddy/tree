@@ -143,6 +143,7 @@ C:\Tree
 └── src/
     ├── main.jsx (entry point)
     ├── App.jsx (screens, state, db helpers, PersonForm, DetailPopup, AddReferralInline)
+    ├── StatsTab.jsx (completeness dashboard + contributor leaderboard)
     ├── NetworkView.jsx (concentric rings view — active Graph view)
     ├── LocalGraph.jsx (radial hop graph — parked, not rendered)
     ├── SVGTree.jsx (SVG card tree — exports getDisplayClan; SVGTree itself is parked)
@@ -172,6 +173,15 @@ git push
 Vercel auto-deploys from main branch.
 
 ## Component map
+
+### src/StatsTab.jsx
+| Component / function | Purpose |
+|----------------------|---------|
+| `StatsTab` | Stats tab UI — completeness score, contributor leaderboard, branch coverage, recent activity, WhatsApp share |
+| `computeCompleteness` | Returns score (0–100) and sorted missing-data list |
+| `computeContributors` | Aggregates added_by/last_edited_by into ranked leaderboard |
+| `computeBranchStats` | Per-clan completeness breakdown |
+| `computeRecentActivity` | Last 15 edited/added persons sorted by updated_at |
 
 ### src/App.jsx
 | Component / function | Purpose |
@@ -223,6 +233,16 @@ Vercel auto-deploys from main branch.
 ### LocalGraph (radial hop graph)
 - **Status**: Replaced by NetworkView (concentric rings) on 2026-06-15. File preserved at src/LocalGraph.jsx.
 - **How to restore**: In App.jsx, import `{ LocalGraph }` and swap NetworkView for LocalGraph in the tree tab. Pass `clans`, `REL`, `referrals`, `onContextMenu` props.
+
+## Stats Tab
+
+Shows family completeness score, contributor leaderboard, branch coverage by clan, and recent activity. Completeness = weighted check of clan, location, birth year, phone, verified status, spouse link, occupation, and profiles across all members. Contributors tracked via `added_by`/`last_edited_by` fields on persons. "Copy Progress for WhatsApp" button generates a shareable text summary with stats and current URL.
+
+Completeness score color: ≥80% green, ≥50% gold, ≥25% copper, <25% red.
+
+NetworkView shows a partial green arc around each node (ring ≤ 2) when that person's data is incomplete — fully complete nodes show no arc.
+
+The family creator is designated as the **Historian** (`historian_name` on the `families` table). Shown in the family header and with a badge in the leaderboard.
 
 ## Code conventions
 - No comments unless the WHY is non-obvious

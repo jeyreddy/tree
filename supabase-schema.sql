@@ -86,3 +86,7 @@ create index idx_persons_parent on persons(parent_id);
 -- ── Migration 2026-06-15: birth year and death year ──
 -- ALTER TABLE persons ADD COLUMN birth_year integer;
 -- ALTER TABLE persons ADD COLUMN death_year integer;
+
+-- ── Migration 2026-06-15: family historian ──
+-- ALTER TABLE families ADD COLUMN historian text DEFAULT '';
+-- ALTER TABLE families ADD COLUMN historian_name text DEFAULT '';

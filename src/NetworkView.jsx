@@ -497,6 +497,26 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                   <circle cx={node.x + node.r - 2} cy={node.y - node.r + 2}
                     r={3.5} fill="#FFC107" pointerEvents="none" />
                 )}
+                {node.ring <= 2 && (() => {
+                  let filled = 0
+                  if (person.location) filled++
+                  if (person.birthYear) filled++
+                  if (person.phone) filled++
+                  if (person.verified) filled++
+                  if (person.occupation?.role || person.occupation?.company) filled++
+                  const pct = filled / 5
+                  if (pct >= 1) return null
+                  const arcR = node.r + 3
+                  const circumference = 2 * Math.PI * arcR
+                  return (
+                    <circle cx={node.x} cy={node.y} r={arcR}
+                      fill="none" stroke="#5B7553" strokeWidth={2}
+                      strokeDasharray={`${circumference * pct} ${circumference * (1 - pct)}`}
+                      strokeDashoffset={circumference * 0.25}
+                      opacity={0.4} pointerEvents="none"
+                      transform={`rotate(-90, ${node.x}, ${node.y})`} />
+                  )
+                })()}
                 <text x={node.x} y={node.y + node.r + 14}
                   textAnchor="middle" fontSize={isFocus ? 12 : 10}
                   fontWeight={isFocus ? 700 : 500}

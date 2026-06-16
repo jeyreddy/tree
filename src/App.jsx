@@ -4,6 +4,7 @@ import { getDisplayClan } from './SVGTree'
 import NetworkView from './NetworkView'
 import MapView from './MapView'
 import PersonForm from './PersonForm'
+import StatsTab from './StatsTab'
 
 // ── DB helpers ──
 const db = {
@@ -95,7 +96,9 @@ export default function App() {
   const createFamily = async (name) => {
     const id = makeId(name)
     await db.createFamily(id, name.trim())
-    const f = { id, name: name.trim() }
+    const historianFields = userName ? { historian: userName, historian_name: userName } : {}
+    if (userName) await db.updateFamily(id, historianFields)
+    const f = { id, name: name.trim(), ...historianFields }
     setFamilies(prev => [f, ...prev])
     openFamily(f)
   }
@@ -217,7 +220,10 @@ export default function App() {
         <button className="header-back" onClick={async () => { setScreen('home'); setFamilies(await db.getFamilies()) }}>←</button>
         <div style={{ flex: 1 }}>
           <div className="header-title">{fam.name}</div>
-          <div className="header-sub">{persons.length} members</div>
+          <div className="header-sub">
+            {persons.length} members
+            {fam.historian_name && <span> · Maintained by <strong>{fam.historian_name}</strong></span>}
+          </div>
         </div>
         <div className="header-tabs">
           <span
@@ -242,7 +248,7 @@ export default function App() {
             <option value="kannada">ಕನ್ನಡ</option>
             <option value="english">English</option>
           </select>
-          {[['tree', 'Tree'], ['export', '↓']].map(([t, l]) => (
+          {[['tree', 'Tree'], ['stats', 'Stats'], ['export', '↓']].map(([t, l]) => (
             <button key={t} className={`header-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{l}</button>
           ))}
         </div>
@@ -371,6 +377,12 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'stats' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <StatsTab persons={persons} fam={fam} />
         </div>
       )}
 
@@ -673,5 +685,6 @@ function RowToPerson(r) {
     verified: r.verified, sortOrder: r.sort_order,
     addedBy: r.added_by || '', lastEditedBy: r.last_edited_by || '',
     birthYear: r.birth_year || null, deathYear: r.death_year || null,
+    updated_at: r.updated_at, created_at: r.created_at,
   }
 }
