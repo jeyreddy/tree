@@ -6,6 +6,7 @@ import MapView from './MapView'
 import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
 import { TrustIndicator, TrustSummary, FlagItForm } from './TrustIndicator'
+import { classifyRelationship, findPath } from './RelationshipEngine'
 
 // ── DB helpers ──
 const db = {
@@ -84,6 +85,25 @@ const LABELS = {
   english: { father: 'Father', mother: 'Mother', husband: 'Husband', wife: 'Wife',   son: 'Son',    daughter: 'Daughter', children: 'Children',     gotra: 'Gotra',     languages: 'Languages', addFamily: 'Add Family' },
 }
 
+// ── Text normalization ──
+function titleCase(str) {
+  if (!str) return ''
+  return str.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function normalizePerson(p) {
+  return {
+    ...p,
+    name: p.name?.trim() || '',
+    clan: titleCase(p.clan),
+    location: titleCase(p.location),
+    nativePlace: titleCase(p.nativePlace),
+    gotra: titleCase(p.gotra),
+    role: p.role?.trim() || '',
+    languages: (p.languages || []).map(l => titleCase(l)),
+  }
+}
+
 // ════════════════════════════════════
 // APP
 // ════════════════════════════════════
@@ -111,13 +131,22 @@ export default function App() {
 
   const openFamily = async (f) => {
     const [rows, refs, vws, disps] = await Promise.all([db.getPersons(f.id), db.getReferrals(f.id), db.getViews(f.id), db.getDisputes(f.id)])
-    setPersons(rows.map(RowToPerson))
+    const mapped = rows.map(RowToPerson)
+    const normalized = mapped.map(normalizePerson)
+    setPersons(normalized)
     setReferrals(refs)
     setViews(vws)
     setDisputes(disps)
     setFam(f); setSel(null); setMode(null); setTab('tree')
     setExpanded(new Set(rows.slice(0, 15).map(r => r.id)))
     setScreen('family')
+    for (let i = 0; i < mapped.length; i++) {
+      const p = mapped[i], clean = normalized[i]
+      if (clean.clan !== p.clan || clean.location !== p.location ||
+          clean.nativePlace !== p.nativePlace || clean.gotra !== p.gotra) {
+        await db.upsertPerson(PersonToRow(clean, f.id))
+      }
+    }
   }
 
   const createFamily = async (name) => {
@@ -142,6 +171,7 @@ export default function App() {
   const parent = selected?.parentId ? persons.find(p => p.id === selected.parentId) : null
 
   const savePerson = async (form) => {
+    form = normalizePerson(form)
     if (mode?.type === 'add') {
       form.addedBy = userName || 'Anonymous'
       form.lastEditedBy = userName || 'Anonymous'
@@ -345,6 +375,7 @@ export default function App() {
                   onContextMenu={handleContextMenu}
                   views={views}
                   disputes={disputes}
+                  fam={fam}
                 />
               )}
 
@@ -401,6 +432,8 @@ export default function App() {
                   setViews(prev => [...prev, view])
                 }
               }}
+              fam={fam}
+              focusId={sel}
               onForceDelete={async () => {
                 const id = contextMenu.person.id
                 setContextMenu(null)
@@ -495,7 +528,7 @@ function HomeScreen({ families, onCreate, onSelect }) {
 }
 
 // ── DETAIL POPUP (right-click floating card) ──
-function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals, views = [], disputes = [], historianName = '', onAddDispute, onResolveDispute, onAutoView }) {
+function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals, views = [], disputes = [], historianName = '', onAddDispute, onResolveDispute, onAutoView, fam = null, focusId = null }) {
   useEffect(() => { if (onAutoView && person?.id) onAutoView(person.id) }, [person?.id])
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
   const dead = person.status === 'deceased'
@@ -520,6 +553,54 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
         <div style={{ fontSize: 17, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none', marginBottom: 2, paddingRight: 24 }}>
           {dead ? '✝ ' : ''}{person.name}<TrustIndicator personId={person.id} fieldName="name" views={views} disputes={disputes} />
         </div>
+
+        {focusId && person.id !== focusId && (() => {
+          const rel = classifyRelationship(focusId, person.id, persons, fam?.language || 'english')
+          if (!rel) return null
+          const weightColor = { highest: '#8B6914', very_high: '#C97B5D', high: '#5B7553', medium: '#999', low: '#ccc' }
+          return (
+            <div style={{ borderLeft: `3px solid ${weightColor[rel.weight] || '#ccc'}`, padding: '6px 8px 6px 11px', marginBottom: 8, background: '#fafafa', borderRadius: '0 6px 6px 0' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>{rel.label}</div>
+              {rel.label !== rel.englishLabel && <div style={{ fontSize: 10, color: '#999' }}>{rel.englishLabel}</div>}
+              {rel.note && <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>{rel.note}</div>}
+            </div>
+          )
+        })()}
+
+        {focusId && person.id !== focusId && (() => {
+          const path = findPath(focusId, person.id, persons)
+          if (!path || path.length <= 2) return null
+          return (
+            <div style={{ marginBottom: 8, background: '#f8f8ff', borderRadius: 6, padding: '6px 8px' }}>
+              <div style={{ fontSize: 9, color: '#bbb', marginBottom: 4, fontWeight: 500, letterSpacing: 0.5 }}>HOW ARE WE RELATED?</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2 }}>
+                {path.map((nodeId, idx) => {
+                  const p = persons.find(x => x.id === nodeId)
+                  if (!p) return null
+                  const isEndpoint = nodeId === focusId || nodeId === person.id
+                  return (
+                    <span key={nodeId} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {idx > 0 && <span style={{ color: '#ccc', fontSize: 10 }}>→</span>}
+                      <span
+                        onClick={() => !isEndpoint && onFocus(nodeId)}
+                        style={{
+                          fontSize: 10,
+                          color: nodeId === focusId ? '#C4A35A' : nodeId === person.id ? '#1a1a1a' : '#4A6FA5',
+                          cursor: isEndpoint ? 'default' : 'pointer',
+                          fontWeight: isEndpoint ? 600 : 400,
+                          textDecoration: !isEndpoint ? 'underline' : 'none',
+                        }}
+                      >
+                        {p.name.length > 14 ? p.name.slice(0, 12) + '…' : p.name}
+                      </span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+
         {person.role && <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>{person.role}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 12, marginBottom: 8 }}>

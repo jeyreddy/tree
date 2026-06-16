@@ -1,5 +1,10 @@
 const CLAN_COLORS = ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D', '#7BAAAA', '#A0522D', '#708090']
 
+function titleCase(str) {
+  if (!str) return ''
+  return str.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+}
+
 function computeCompleteness(persons) {
   if (persons.length === 0) return { score: 0, missing: [] }
   let totalFields = 0, filledFields = 0
@@ -62,7 +67,7 @@ function computeContributors(persons) {
 function computeBranchStats(persons) {
   const clanGroups = {}
   persons.forEach(p => {
-    const clan = p.clan || 'Unknown'
+    const clan = titleCase(p.clan) || 'Unknown'
     if (!clanGroups[clan]) clanGroups[clan] = []
     clanGroups[clan].push(p)
   })

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { classifyRelationship, getWeightValue } from './RelationshipEngine'
 
 const CLAN_COLORS = ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D', '#7BAAAA', '#A0522D', '#708090']
 const RING_RADII = [0, 130, 260, 380, 490]
@@ -10,6 +11,11 @@ const RING_FILLS = [
   'rgba(140,160,180,0.04)',
   'rgba(120,120,140,0.02)',
 ]
+
+function titleCase(str) {
+  if (!str) return ''
+  return str.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+}
 
 function getClanColor(clan, allClans) {
   if (!clan) return '#888'
@@ -230,7 +236,7 @@ function positionNodes(focusId, assignments, persons, cx, cy) {
   return nodes
 }
 
-export default function NetworkView({ persons, sel, setSel, onContextMenu, referrals = [], views = [], disputes = [] }) {
+export default function NetworkView({ persons, sel, setSel, onContextMenu, referrals = [], views = [], disputes = [], fam = null }) {
   const svgRef = useRef(null)
   const [focusId, setFocusId] = useState(null)
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 })
@@ -242,7 +248,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
   const panRef = useRef(false)
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
 
-  const allClans = [...new Set(persons.map(p => p.clan).filter(Boolean))].sort()
+  const allClans = [...new Set(persons.map(p => titleCase(p.clan)).filter(Boolean))].sort()
   const CX = 500, CY = 400
 
   // Initialize focus to most-connected root
@@ -415,13 +421,44 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
 
             const srcR = assignments.get(e.source)?.ring ?? 4
             const tgtR = assignments.get(e.target)?.ring ?? 4
-            const opacity = Math.max(0.10, 0.45 - Math.max(srcR, tgtR) * 0.08)
+            let edgeOpacity = Math.max(0.10, 0.45 - Math.max(srcR, tgtR) * 0.08)
+            let edgeWidth = 1
+            if (e.source === focusId || e.target === focusId) {
+              const otherId = e.source === focusId ? e.target : e.source
+              const rel = classifyRelationship(focusId, otherId, persons, fam?.language || 'english')
+              if (rel) {
+                edgeWidth = Math.max(1, getWeightValue(rel) * 0.6)
+                edgeOpacity = Math.min(0.8, 0.2 + getWeightValue(rel) * 0.12)
+              }
+            }
             return (
               <line key={i} pointerEvents="none"
                 x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                stroke="#555" strokeWidth={1} opacity={opacity} />
+                stroke="#555" strokeWidth={edgeWidth} opacity={edgeOpacity} />
             )
           })}
+
+          {/* Relationship labels on parent-child edges from focus */}
+          {edges
+            .filter(e => e.type === 'parent' && (e.source === focusId || e.target === focusId))
+            .map((e, i) => {
+              const otherId = e.source === focusId ? e.target : e.source
+              const a = nodeMap[e.source], b = nodeMap[e.target]
+              if (!a || !b) return null
+              const rel = classifyRelationship(focusId, otherId, persons, fam?.language || 'english')
+              if (!rel) return null
+              const mx = (a.x + b.x) / 2
+              const my = (a.y + b.y) / 2
+              const shortLabel = rel.label.split('/')[0].split('(')[0].trim()
+              return (
+                <text key={`rl-${i}`} x={mx} y={my - 6}
+                  textAnchor="middle" fontSize={8} fill="#888"
+                  fontStyle="italic" pointerEvents="none"
+                  style={{ userSelect: 'none' }}>
+                  {shortLabel.length > 12 ? shortLabel.slice(0, 10) + '…' : shortLabel}
+                </text>
+              )
+            })}
 
           {/* Nodes */}
           {finalNodes.map(node => {
@@ -430,7 +467,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
             const dead = person.status === 'deceased'
             const isFocus = node.id === focusId
             const isSelected = node.id === sel && !isFocus
-            const cc = getClanColor(person.clan, allClans)
+            const cc = getClanColor(titleCase(person.clan), allClans)
             const opacity = node.ring <= 2 ? 1 : node.ring === 3 ? 0.7 : 0.45
 
             return (
