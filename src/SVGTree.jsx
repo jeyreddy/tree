@@ -52,7 +52,7 @@ export function findPrimaryRoot(rootIds, persons) {
   return bestRoot
 }
 
-function getCoupleChildren(personId, spouseId, persons) {
+export function getCoupleChildren(personId, spouseId, persons) {
   const childIds = new Set()
   const children = []
   persons.forEach(p => {

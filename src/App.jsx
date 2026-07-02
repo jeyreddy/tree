@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { SVGTree, findRoots, getDisplayClan } from './SVGTree'
 import NetworkView from './NetworkView'
 import MapView from './MapView'
+import ExplorerView from './ExplorerView'
 import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
 import { TrustIndicator, TrustSummary, FlagItForm } from './TrustIndicator'
@@ -379,6 +380,10 @@ export default function App() {
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'tree' ? '#1a1a1a' : 'transparent', color: view === 'tree' ? '#fff' : '#999' }}>
                     Tree
                   </button>
+                  <button onClick={() => setView('explorer')}
+                    style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'explorer' ? '#1a1a1a' : 'transparent', color: view === 'explorer' ? '#fff' : '#999' }}>
+                    Explorer
+                  </button>
                   <button onClick={() => setView('map')}
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'map' ? '#1a1a1a' : 'transparent', color: view === 'map' ? '#fff' : '#999' }}>
                     Map
@@ -403,6 +408,18 @@ export default function App() {
                   rootIds={rootIds}
                   onAddRoot={addRootAction}
                   onContextMenu={handleContextMenu}
+                />
+              ) : view === 'explorer' ? (
+                <ExplorerView
+                  persons={persons}
+                  sel={sel}
+                  setSel={id => { setSel(id); setSearch('') }}
+                  rootIds={rootIds}
+                  expanded={expanded}
+                  setExpanded={setExpanded}
+                  referrals={referrals}
+                  onContextMenu={handleContextMenu}
+                  onAddRoot={addRootAction}
                 />
               ) : (
                 <NetworkView
