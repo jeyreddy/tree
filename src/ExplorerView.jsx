@@ -1,6 +1,17 @@
 import { useState } from 'react'
 import { getCoupleChildren } from './SVGTree'
 
+// A person is a "married-in satellite" here if their spouse is male and already has
+// their own blood-parent branch elsewhere in the tree — mirrors the male-primary
+// convention used for `bloodFather` elsewhere in this codebase. Prevents a couple's
+// whole subtree (e.g. Devi & Kiran Kumar) from being rendered twice: once under her
+// blood parent, once under his.
+function isMarriedInSatellite(person, persons) {
+  if (!person.spouseId) return false
+  const spouse = persons.find(p => p.id === person.spouseId)
+  return !!spouse && person.gender === 'F' && spouse.gender === 'M' && !!spouse.parentId
+}
+
 function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onContextMenu, dragInfo, setDragInfo, onRelink, ancestors }) {
   const person = persons.find(p => p.id === id)
   if (!person) return null
@@ -68,10 +79,34 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
         )}
       </div>
       {isOpen && kids.map(k => (
-        <TreeRow key={k.id} id={k.id} depth={depth + 1} persons={persons} sel={sel} setSel={setSel}
-          expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
-          dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} ancestors={nextAncestors} />
+        isMarriedInSatellite(k, persons) ? (
+          <SatelliteLeaf key={k.id} person={k} persons={persons} sel={sel} setSel={setSel}
+            depth={depth + 1} onContextMenu={onContextMenu} />
+        ) : (
+          <TreeRow key={k.id} id={k.id} depth={depth + 1} persons={persons} sel={sel} setSel={setSel}
+            expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
+            dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} ancestors={nextAncestors} />
+        )
       ))}
+    </div>
+  )
+}
+
+// Married-in-elsewhere child: shown as a plain leaf (no couple merge, no recursion into
+// shared children) since their full branch already renders under their spouse's side.
+function SatelliteLeaf({ person, persons, sel, setSel, depth, onContextMenu }) {
+  const isDead = person.status === 'deceased'
+  const spouse = persons.find(p => p.id === person.spouseId)
+  return (
+    <div
+      className={`tree-node ${sel === person.id ? 'selected' : ''} ${isDead ? 'deceased' : ''}`}
+      style={{ paddingLeft: 10 + depth * 16 }}
+      onClick={() => setSel(person.id)}
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu?.(person.id, e) }}
+    >
+      <span style={{ width: 14, flexShrink: 0 }} />
+      <span style={{ fontSize: 13 }}>{(isDead ? '✝ ' : '') + person.name}</span>
+      {spouse && <span style={{ fontSize: 10, color: '#bbb', marginLeft: 4 }}>married to {spouse.name}</span>}
     </div>
   )
 }

@@ -159,7 +159,7 @@ export default function App() {
     setViews(vws)
     setDisputes(disps)
     setFam(f); setSel(null); setMode(null); setTab('tree')
-    setExpanded(new Set(rows.slice(0, 15).map(r => r.id)))
+    setExpanded(new Set(rows.map(r => r.id)))
     setScreen('family')
     for (let i = 0; i < mapped.length; i++) {
       const p = mapped[i], clean = normalized[i]
