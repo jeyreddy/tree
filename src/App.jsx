@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
-import { getDisplayClan } from './SVGTree'
+import { SVGTree, findRoots, getDisplayClan } from './SVGTree'
 import NetworkView from './NetworkView'
 import MapView from './MapView'
 import PersonForm from './PersonForm'
@@ -291,6 +291,10 @@ export default function App() {
   const getSpouseLabel = (person) => person.gender === 'M' ? REL.wife : REL.husband
   const getParentLabel = (par) => par.gender === 'M' ? REL.father : REL.mother
 
+  const clans = [...new Set(persons.map(p => p.clan).filter(Boolean))].sort()
+  const rootIds = findRoots(persons)
+  const addRootAction = persons.length > 0 ? () => setMode({ type: 'add', dir: 'child', parentId: null }) : undefined
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div className="header">
@@ -371,6 +375,10 @@ export default function App() {
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'graph' ? '#1a1a1a' : 'transparent', color: view === 'graph' ? '#fff' : '#999' }}>
                     Graph
                   </button>
+                  <button onClick={() => setView('tree')}
+                    style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'tree' ? '#1a1a1a' : 'transparent', color: view === 'tree' ? '#fff' : '#999' }}>
+                    Tree
+                  </button>
                   <button onClick={() => setView('map')}
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'map' ? '#1a1a1a' : 'transparent', color: view === 'map' ? '#fff' : '#999' }}>
                     Map
@@ -384,6 +392,16 @@ export default function App() {
                   persons={persons}
                   sel={sel}
                   setSel={id => { setSel(id); setSearch('') }}
+                  onContextMenu={handleContextMenu}
+                />
+              ) : view === 'tree' ? (
+                <SVGTree
+                  persons={persons}
+                  sel={sel}
+                  setSel={id => { setSel(id); setSearch('') }}
+                  clans={clans}
+                  rootIds={rootIds}
+                  onAddRoot={addRootAction}
                   onContextMenu={handleContextMenu}
                 />
               ) : (

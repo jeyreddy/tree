@@ -187,7 +187,7 @@ function recomputeConnectors(finalCards, persons, inLawLinks) {
   return connectors
 }
 
-export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
+export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot, onContextMenu }) {
   const [pan, setPan] = useState({ x: 40, y: 40 })
   const [zoom, setZoom] = useState(1)
   const [cardPositions, setCardPositions] = useState({})
@@ -390,6 +390,10 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot }) {
               <g key={card.id}
                 style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
                 onClick={e => { e.stopPropagation(); if (!didDragRef.current) setSel(card.id) }}
+                onContextMenu={e => {
+                  e.preventDefault(); e.stopPropagation()
+                  if (onContextMenu) onContextMenu(card.id, e)
+                }}
                 onMouseDown={e => {
                   e.stopPropagation()
                   didDragRef.current = false
