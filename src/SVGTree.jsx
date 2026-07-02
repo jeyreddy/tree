@@ -63,6 +63,11 @@ function getCoupleChildren(personId, spouseId, persons) {
   return children.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
 }
 
+function rectsOverlap(a, b, pad = 6) {
+  return a.x < b.x + b.w + pad && a.x + a.w + pad > b.x &&
+         a.y < b.y + b.h + pad && a.y + a.h + pad > b.y
+}
+
 function getClanColor(clan, allClans) {
   if (!clan) return '#ddd'
   const idx = allClans.indexOf(clan)
@@ -225,7 +230,16 @@ export function SVGTree({ persons, sel, setSel, clans, rootIds, onAddRoot, onCon
       const coupleW = rootSpouse ? CARD_W * 2 + COUPLE_GAP : CARD_W
       const coupleCenter = childCard.x + CARD_W / 2
       const inLawX = coupleCenter - coupleW / 2
-      const inLawY = childCard.y - CARD_H - IN_LAW_GAP
+      let inLawY = childCard.y - CARD_H - IN_LAW_GAP
+
+      // Push the in-law couple up past any existing row it would otherwise land on top of
+      // (happens when the married-in child's own generation row sits close above another
+      // branch's cards at the same x position)
+      let guard = 0
+      while (allCards.some(c => rectsOverlap({ x: inLawX, y: inLawY, w: coupleW, h: CARD_H }, c)) && guard < 20) {
+        inLawY -= (CARD_H + GEN_GAP)
+        guard++
+      }
 
       allCards.push({ id: rootPerson.id, x: inLawX, y: inLawY, w: CARD_W, h: CARD_H, inLaw: true })
       if (rootSpouse) {
