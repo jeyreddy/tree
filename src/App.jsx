@@ -242,6 +242,42 @@ export default function App() {
   const openEdit = (id) => setMode({ type: 'edit', id })
   const openAdd = (id, dir, gender) => setMode({ type: 'add', dir, parentId: id, gender })
 
+  const isDescendant = (ancestorId, candidateId) => {
+    const kids = persons.filter(p => p.parentId === ancestorId)
+    return kids.some(k => k.id === candidateId || isDescendant(k.id, candidateId))
+  }
+
+  // Links two EXISTING people as spouses or as parent/child — the drag-and-drop
+  // counterpart to the "Add Father/Wife/Son" buttons, which only ever create new people.
+  const relinkPersons = async (draggedId, targetId, mode) => {
+    if (draggedId === targetId) return
+    const dragged = persons.find(p => p.id === draggedId)
+    const target = persons.find(p => p.id === targetId)
+    if (!dragged || !target) return
+
+    if (mode === 'spouse') {
+      if (dragged.spouseId || target.spouseId) {
+        alert(`${dragged.spouseId ? dragged.name : target.name} already has a spouse — unlink them first (Edit) before connecting a new one.`)
+        return
+      }
+      if (!window.confirm(`Connect ${dragged.name} and ${target.name} as spouses?`)) return
+      await db.updatePerson(dragged.id, { spouse_id: target.id })
+      await db.updatePerson(target.id, { spouse_id: dragged.id })
+    } else if (mode === 'child') {
+      if (isDescendant(dragged.id, target.id)) {
+        alert(`Can't do that — ${target.name} is already a descendant of ${dragged.name}, so this would create a loop.`)
+        return
+      }
+      if (target.id === dragged.parentId) return
+      const targetSpouse = target.spouseId ? persons.find(p => p.id === target.spouseId) : null
+      const bloodParent = target.gender === 'M' ? target : (targetSpouse?.gender === 'M' ? targetSpouse : target)
+      const replacing = dragged.parentId ? ` (replacing their current parent)` : ''
+      if (!window.confirm(`Make ${dragged.name} a child of ${bloodParent.name}${replacing}?`)) return
+      await db.updatePerson(dragged.id, { parent_id: bloodParent.id })
+    }
+    await refresh()
+  }
+
   const deletePerson = async (id) => {
     if (getKids(id).length > 0) return alert('Move or delete children first')
     const p = persons.find(x => x.id === id)
@@ -427,6 +463,7 @@ export default function App() {
                   onAdd={openAdd}
                   onDelete={deletePerson}
                   onVerify={toggleVerified}
+                  onRelink={relinkPersons}
                   REL={REL}
                 />
               ) : (
@@ -717,10 +754,16 @@ function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, o
         )}
 
         <div style={{ fontSize: 10, color: '#bbb', marginBottom: 5, fontWeight: 500, letterSpacing: 0.5 }}>{(REL?.addFamily || 'ADD FAMILY').toUpperCase()}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 4 }}>
-          <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
-          <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
-        </div>
+        {!person.parentId ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 4 }}>
+            <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
+            <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 10, color: '#bbb', marginBottom: 4 }}>
+            To add grandparents, open their parent's own record and add Father/Mother there.
+          </div>
+        )}
         {!person.spouseId && (
           <button className="btn btn-copper btn-sm btn-full" style={{ marginBottom: 4 }}
             onClick={() => onAdd('spouse', person.gender === 'M' ? 'F' : 'M')}>

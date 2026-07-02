@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { getCoupleChildren } from './SVGTree'
 
-function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onContextMenu }) {
+function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onContextMenu, dragInfo, setDragInfo, onRelink }) {
   const person = persons.find(p => p.id === id)
   if (!person) return null
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
@@ -20,13 +20,37 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
     })
   }
 
+  const isDropTarget = dragInfo?.overId === id && dragInfo.draggedId !== id
+  const dropMode = isDropTarget ? dragInfo.mode : null
+
   return (
     <div>
       <div
         className={`tree-node ${isSelected ? 'selected' : ''} ${isDead ? 'deceased' : ''}`}
-        style={{ paddingLeft: 10 + depth * 16 }}
+        style={{
+          paddingLeft: 10 + depth * 16, cursor: 'grab',
+          outline: isDropTarget ? `2px solid ${dropMode === 'child' ? '#5B7553' : '#4A6FA5'}` : 'none',
+          outlineOffset: -2,
+          background: isDropTarget ? (dropMode === 'child' ? '#eef5ee' : '#eef2fb') : undefined,
+        }}
         onClick={() => setSel(id)}
         onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu?.(id, e) }}
+        draggable={!!onRelink}
+        onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'link'; setDragInfo({ draggedId: id }) }}
+        onDragOver={e => {
+          if (!dragInfo || dragInfo.draggedId === id) return
+          e.preventDefault(); e.stopPropagation()
+          const rect = e.currentTarget.getBoundingClientRect()
+          const mode = (e.clientY - rect.top) / rect.height > 0.65 ? 'child' : 'spouse'
+          if (dragInfo.overId !== id || dragInfo.mode !== mode) setDragInfo({ draggedId: dragInfo.draggedId, overId: id, mode })
+        }}
+        onDragLeave={e => { e.stopPropagation(); setDragInfo(prev => (prev?.overId === id ? { draggedId: prev.draggedId } : prev)) }}
+        onDrop={e => {
+          e.preventDefault(); e.stopPropagation()
+          if (dragInfo && dragInfo.draggedId !== id) onRelink?.(dragInfo.draggedId, id, dragInfo.mode || 'spouse')
+          setDragInfo(null)
+        }}
+        onDragEnd={() => setDragInfo(null)}
       >
         <span onClick={toggle} style={{ width: 14, fontSize: 10, color: '#bbb', cursor: hasKids ? 'pointer' : 'default', textAlign: 'center', flexShrink: 0 }}>
           {hasKids ? (isOpen ? '▾' : '▸') : '·'}
@@ -34,10 +58,16 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
         <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500 }}>
           {(isDead ? '✝ ' : '') + person.name}{spouse ? ` & ${spouse.name}` : ''}
         </span>
+        {isDropTarget && (
+          <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: dropMode === 'child' ? '#5B7553' : '#4A6FA5' }}>
+            {dropMode === 'child' ? '↓ make child' : '♥ make spouse'}
+          </span>
+        )}
       </div>
       {isOpen && kids.map(k => (
         <TreeRow key={k.id} id={k.id} depth={depth + 1} persons={persons} sel={sel} setSel={setSel}
-          expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu} />
+          expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
+          dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} />
       ))}
     </div>
   )
@@ -125,9 +155,18 @@ function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagF
         <>
           <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #eee' }} />
           <div style={{ fontSize: 11, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', marginBottom: 8 }}>{REL?.addFamily || 'Add family'}</div>
+          {person.parentId && (
+            <div style={{ fontSize: 10, color: '#bbb', marginBottom: 6 }}>
+              To add grandparents, open <PersonLink id={person.parentId} persons={persons} setSel={setSel} />'s own record and add Father/Mother there.
+            </div>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-            <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
-            <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
+            {!person.parentId && (
+              <>
+                <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
+                <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
+              </>
+            )}
             {!person.spouseId && (
               <button className="btn btn-copper btn-sm" onClick={() => onAdd(person.id, 'spouse', person.gender === 'M' ? 'F' : 'M')}>
                 ♥ {person.gender === 'M' ? (REL?.wife || 'Wife') : (REL?.husband || 'Husband')}
@@ -175,8 +214,9 @@ function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagF
   )
 }
 
-export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, setExpanded, referrals = [], onContextMenu, onAddRoot, onEdit, onAdd, onDelete, onVerify, REL }) {
+export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, setExpanded, referrals = [], onContextMenu, onAddRoot, onEdit, onAdd, onDelete, onVerify, onRelink, REL }) {
   const [tagFilter, setTagFilter] = useState(null)
+  const [dragInfo, setDragInfo] = useState(null)
   const person = sel ? persons.find(p => p.id === sel) : null
 
   const tagMatches = tagFilter
@@ -203,9 +243,15 @@ export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, 
           </>
         ) : (
           <>
+            {onRelink && (
+              <div style={{ padding: '2px 8px 8px', fontSize: 9, color: '#ccc', lineHeight: 1.5 }}>
+                Drag a person onto another: drop near the top to link as spouse, near the bottom to make them a child.
+              </div>
+            )}
             {rootIds.map(id => (
               <TreeRow key={id} id={id} depth={0} persons={persons} sel={sel} setSel={setSel}
-                expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu} />
+                expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
+                dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} />
             ))}
             {onAddRoot && (
               <div onClick={onAddRoot} style={{ margin: '10px 8px', padding: '6px 8px', fontSize: 11, color: '#bbb', border: '1.5px dashed #ddd', borderRadius: 6, cursor: 'pointer', textAlign: 'center' }}>
