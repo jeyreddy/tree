@@ -264,6 +264,10 @@ export default function App() {
       await db.updatePerson(dragged.id, { spouse_id: target.id })
       await db.updatePerson(target.id, { spouse_id: dragged.id })
     } else if (mode === 'child') {
+      if (dragged.spouseId === target.id || target.spouseId === dragged.id) {
+        alert(`${dragged.name} and ${target.name} are already linked as spouses — one can't also be the other's child.`)
+        return
+      }
       if (isDescendant(dragged.id, target.id)) {
         alert(`Can't do that — ${target.name} is already a descendant of ${dragged.name}, so this would create a loop.`)
         return

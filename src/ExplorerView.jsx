@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { getCoupleChildren } from './SVGTree'
 
-function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onContextMenu, dragInfo, setDragInfo, onRelink }) {
+function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onContextMenu, dragInfo, setDragInfo, onRelink, ancestors }) {
   const person = persons.find(p => p.id === id)
   if (!person) return null
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
-  const kids = getCoupleChildren(person.id, spouse?.id, persons)
+  // Guards against corrupted data (e.g. someone's parent_id pointing at their own spouse)
+  // that would otherwise recurse forever and blank out the whole pane.
+  const kids = getCoupleChildren(person.id, spouse?.id, persons).filter(k => !ancestors.has(k.id))
+  const nextAncestors = spouse ? new Set([...ancestors, id, spouse.id]) : new Set([...ancestors, id])
   const hasKids = kids.length > 0
   const isOpen = expanded.has(id)
   const isDead = person.status === 'deceased'
@@ -41,7 +44,7 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
           if (!dragInfo || dragInfo.draggedId === id) return
           e.preventDefault(); e.stopPropagation()
           const rect = e.currentTarget.getBoundingClientRect()
-          const mode = (e.clientY - rect.top) / rect.height > 0.65 ? 'child' : 'spouse'
+          const mode = (e.clientY - rect.top) / rect.height > 0.75 ? 'child' : 'spouse'
           if (dragInfo.overId !== id || dragInfo.mode !== mode) setDragInfo({ draggedId: dragInfo.draggedId, overId: id, mode })
         }}
         onDragLeave={e => { e.stopPropagation(); setDragInfo(prev => (prev?.overId === id ? { draggedId: prev.draggedId } : prev)) }}
@@ -67,7 +70,7 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
       {isOpen && kids.map(k => (
         <TreeRow key={k.id} id={k.id} depth={depth + 1} persons={persons} sel={sel} setSel={setSel}
           expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
-          dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} />
+          dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} ancestors={nextAncestors} />
       ))}
     </div>
   )
@@ -251,7 +254,7 @@ export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, 
             {rootIds.map(id => (
               <TreeRow key={id} id={id} depth={0} persons={persons} sel={sel} setSel={setSel}
                 expanded={expanded} setExpanded={setExpanded} onContextMenu={onContextMenu}
-                dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} />
+                dragInfo={dragInfo} setDragInfo={setDragInfo} onRelink={onRelink} ancestors={new Set()} />
             ))}
             {onAddRoot && (
               <div onClick={onAddRoot} style={{ margin: '10px 8px', padding: '6px 8px', fontSize: 11, color: '#bbb', border: '1.5px dashed #ddd', borderRadius: 6, cursor: 'pointer', textAlign: 'center' }}>

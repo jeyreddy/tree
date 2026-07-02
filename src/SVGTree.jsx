@@ -86,11 +86,14 @@ export function getDisplayClan(person, persons) {
   return person.clan || ''
 }
 
-function layoutFamily(personId, startX, startY, persons) {
+function layoutFamily(personId, startX, startY, persons, ancestors = new Set()) {
   const person = persons.find(p => p.id === personId)
   if (!person) return { width: CARD_W, cards: [], connectors: [], coupleCenter: startX + CARD_W / 2 }
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
-  const children = getCoupleChildren(person.id, spouse?.id, persons)
+  // Guards against corrupted data (e.g. someone's parent_id pointing at their own spouse)
+  // that would otherwise recurse forever.
+  const children = getCoupleChildren(person.id, spouse?.id, persons).filter(c => !ancestors.has(c.id))
+  const nextAncestors = spouse ? new Set([...ancestors, person.id, spouse.id]) : new Set([...ancestors, person.id])
   const coupleW = spouse ? CARD_W * 2 + COUPLE_GAP : CARD_W
 
   if (children.length === 0) {
@@ -109,7 +112,7 @@ function layoutFamily(personId, startX, startY, persons) {
   const childLayouts = []
   children.forEach((child, i) => {
     if (i > 0) childX += SIB_GAP
-    const childLayout = layoutFamily(child.id, childX, startY + CARD_H + GEN_GAP, persons)
+    const childLayout = layoutFamily(child.id, childX, startY + CARD_H + GEN_GAP, persons, nextAncestors)
     childLayouts.push(childLayout)
     childX += childLayout.width
   })
