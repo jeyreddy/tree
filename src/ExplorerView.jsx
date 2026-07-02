@@ -53,7 +53,7 @@ function PersonLink({ id, persons, setSel }) {
   )
 }
 
-function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagFilter }) {
+function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagFilter, onEdit, onAdd, onDelete, onVerify, REL }) {
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
   const parent = person.parentId ? persons.find(p => p.id === person.parentId) : null
   const kids = getCoupleChildren(person.id, spouse?.id, persons)
@@ -121,6 +121,29 @@ function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagF
         )}
       </div>
 
+      {onAdd && (
+        <>
+          <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #eee' }} />
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', marginBottom: 8 }}>{REL?.addFamily || 'Add family'}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
+            <button className="btn btn-gold btn-sm" onClick={() => onAdd(person.id, 'ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
+            {!person.spouseId && (
+              <button className="btn btn-copper btn-sm" onClick={() => onAdd(person.id, 'spouse', person.gender === 'M' ? 'F' : 'M')}>
+                ♥ {person.gender === 'M' ? (REL?.wife || 'Wife') : (REL?.husband || 'Husband')}
+              </button>
+            )}
+            <button className="btn btn-green btn-sm" onClick={() => onAdd(person.id, 'child', 'M')}>↓ {REL?.son || 'Son'}</button>
+            <button className="btn btn-green btn-sm" onClick={() => onAdd(person.id, 'child', 'F')}>↓ {REL?.daughter || 'Daughter'}</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn-dark btn-sm" onClick={() => onEdit(person.id)}>Edit</button>
+            {!person.verified && <button className="btn btn-gold btn-sm" onClick={() => onVerify(person.id)}>Verify ✓</button>}
+            <button className="btn btn-grey btn-sm" onClick={() => onDelete(person.id)}>Delete</button>
+          </div>
+        </>
+      )}
+
       {person.notes && (
         <>
           <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #eee' }} />
@@ -152,7 +175,7 @@ function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagF
   )
 }
 
-export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, setExpanded, referrals = [], onContextMenu, onAddRoot }) {
+export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, setExpanded, referrals = [], onContextMenu, onAddRoot, onEdit, onAdd, onDelete, onVerify, REL }) {
   const [tagFilter, setTagFilter] = useState(null)
   const person = sel ? persons.find(p => p.id === sel) : null
 
@@ -198,7 +221,8 @@ export default function ExplorerView({ persons, sel, setSel, rootIds, expanded, 
           <div style={{ color: '#bbb', fontSize: 13 }}>Select a person on the left to view their record.</div>
         ) : (
           <PersonNote person={person} persons={persons} referrals={referrals} setSel={setSel}
-            onContextMenu={onContextMenu} setTagFilter={setTagFilter} />
+            onContextMenu={onContextMenu} setTagFilter={setTagFilter}
+            onEdit={onEdit} onAdd={onAdd} onDelete={onDelete} onVerify={onVerify} REL={REL} />
         )}
       </div>
     </div>

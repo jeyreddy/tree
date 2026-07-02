@@ -239,6 +239,9 @@ export default function App() {
     await refresh()
   }
 
+  const openEdit = (id) => setMode({ type: 'edit', id })
+  const openAdd = (id, dir, gender) => setMode({ type: 'add', dir, parentId: id, gender })
+
   const deletePerson = async (id) => {
     if (getKids(id).length > 0) return alert('Move or delete children first')
     const p = persons.find(x => x.id === id)
@@ -420,6 +423,11 @@ export default function App() {
                   referrals={referrals}
                   onContextMenu={handleContextMenu}
                   onAddRoot={addRootAction}
+                  onEdit={openEdit}
+                  onAdd={openAdd}
+                  onDelete={deletePerson}
+                  onVerify={toggleVerified}
+                  REL={REL}
                 />
               ) : (
                 <NetworkView
@@ -461,8 +469,8 @@ export default function App() {
               persons={persons}
               REL={REL}
               onClose={() => setContextMenu(null)}
-              onEdit={() => { const id = contextMenu.person.id; setContextMenu(null); setMode({ type: 'edit', id }) }}
-              onAdd={(dir, gender) => { const pid = contextMenu.person.id; setContextMenu(null); setMode({ type: 'add', dir, parentId: pid, gender }) }}
+              onEdit={() => { const id = contextMenu.person.id; setContextMenu(null); openEdit(id) }}
+              onAdd={(dir, gender) => { const pid = contextMenu.person.id; setContextMenu(null); openAdd(pid, dir, gender) }}
               onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
               onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
               onFocus={id => { setSel(id); setContextMenu(null) }}
