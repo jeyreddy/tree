@@ -1,297 +1,212 @@
 # Kula Vruksham — Handoff Note
 
-**Date:** June 16, 2026
+**Date:** July 3, 2026
 **Project owner:** Jagan Mohan Reddy (JY Reddy)
-**GitHub:** https://github.com/jeyreddy/tree
-**Local dev:** C:\Tree → `npm run dev` → http://localhost:5173
-**Live:** Deployed on Vercel (auto-deploys from main branch)
+**GitHub:** https://github.com/jeyreddy/tree (use the **jeyreddy** account, NOT YJMREDDY — that's a separate project)
+**Local dev:** `C:\Tree` → `npm run dev` → http://localhost:5173
+**Live:** Vercel, auto-deploys from `main` on every push
 **Database:** Supabase (Postgres) — credentials in `.env`
-**GitHub account for this project:** jeyreddy (NOT YJMREDDY — that's a separate project)
+**Current HEAD:** `3f2d0f1` (Expand Explorer fully by default; dedupe married-in branches)
+
+> This note supersedes the June 16 version. It was verified against the live database and current code on July 3, 2026. Read `CLAUDE.md` first — it is the source of truth for rendering rules and data invariants; this note is the orientation layer on top of it.
 
 ---
 
 ## What This Is
 
-A multi-family Indian genealogy platform — think Ancestry.com but built natively for Indian family structures (clans/intiperu, gotras, maiden names, cross-family marriages, joint family complexity). Currently being dogfooded with the Yeturu family as the initial dataset.
+A multi-family Indian genealogy platform — Ancestry.com but built natively for Indian family structures (clans/intiperu, gotras, maiden names, cross-family marriages, joint-family complexity). Dogfooded on the **Yeturu family** (Jagan's own, ~23 people).
 
-This is a decade-long product, not a proof of concept. The goal is to become the family network platform for Indian families — starting with genealogy, expanding to a social identity graph.
-
-## The Research Foundation
-
-The product is grounded in a working paper: "Spectral Analysis of Multi-Dimensional Social Identity Networks" (Reddy, 2026). The paper models Indian society as a multi-layer graph where each person sits at the intersection of overlapping identity circles (jaati, region, language, profession, kinship). Each layer oscillates at a characteristic frequency — caste/gotra is near-DC (centuries-stable), profession changes yearly, technology adoption changes monthly.
-
-The data model was designed so every field on a person node maps directly to a layer in the multi-layer graph Laplacian from the paper. This isn't academic decoration — it means the platform can eventually compute eigenvalues, Fiedler values, and community detection on real family data.
-
-Key paper concepts implemented in the product:
-- **Multi-layer identity:** clan, gotra, languages, location, profession, profiles = separate analyzable layers
-- **Concentric identity circles:** the graph UI literally shows rings around a focus person (Ring 1 = immediate family, Ring 2 = extended, Ring 3 = in-laws, Ring 4 = wider network)
-- **Proxy nodes:** the WhatsApp pipeline concept addresses digitally invisible elders
-- **Broker nodes / KNA:** the referral system ("ask X about Y") is the knowledge network from the paper
-- **Trust as neural computation:** the trust engine implements consensus verification through overlapping witnesses
+Decade-long product, not a POC. Grounded in the working paper *"Spectral Analysis of Multi-Dimensional Social Identity Networks"* (Reddy, 2026): every field on a person maps to a layer in a multi-layer identity graph, so the platform can eventually run spectral/community analysis on real family data. The concentric-rings UI, the referral ("who knows about X") layer, and the trust engine are all direct implementations of paper concepts.
 
 ## Tech Stack
 
 ```
-Frontend:  React + Vite
-Database:  Supabase (Postgres, free tier)
-Hosting:   Vercel (auto-deploy from GitHub)
-Auth:      None currently — open access, anyone with URL can contribute
-Git:       github.com/jeyreddy/tree (use jeyreddy account, NOT YJMREDDY)
-IDE:       VS Code with Claude Code extension
+Frontend:  React 18 + Vite 6
+Database:  Supabase (Postgres, free tier), accessed via @supabase/supabase-js
+Hosting:   Vercel (auto-deploy from GitHub main)
+Auth:      NONE — open access, anyone with the URL can read/write (RLS allows public all)
+IDE:       VS Code + Claude Code extension
 ```
 
-## File Structure
+## How to Run
+
+```bash
+cd C:\Tree
+npm install          # first time only
+npm run dev          # → http://localhost:5173
+npm run build        # production build — MUST be zero-error before every commit
+```
+
+`.env` must contain `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (copy shape from `.env.example`). No other services needed to run locally — it talks directly to the shared Supabase project.
+
+**Deploy:** just `git push` to `main`. Vercel builds and deploys automatically.
+
+## Login / Auth Status
+
+There is **no login**. Access is open by design (reduces friction for elderly family members; anyone with the URL can contribute). Attribution is handled by a lightweight "Who are you?" name prompt stored in `localStorage` (`kv-username`) — used to populate `added_by` / `last_edited_by`, not real auth.
+
+A Supabase **magic-link login was built and parked** (reverted 2026-06-11). To restore it, see `.claude/commands/enable-login.md` (or run the `/enable-login` skill). Re-enable only once multi-family usage grows past a handful of families.
+
+## File Structure (with current line counts)
 
 ```
 C:\Tree/
-├── index.html
-├── package.json
-├── vite.config.js
-├── supabase-schema.sql      ← full schema + migration comments
-├── .env                     ← VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
-├── .gitignore
-├── CLAUDE.md                ← Claude Code memory file (READ THIS FIRST)
-├── README.md                ← deploy instructions
+├── CLAUDE.md              ← READ FIRST — rendering rules + data invariants (authoritative)
+├── HANDOFF.md             ← this file
+├── README.md              ← deploy instructions
+├── supabase-schema.sql    ← base schema + migration comments (see schema-drift warning below)
+├── .env / .env.example    ← Supabase credentials
 └── src/
-    ├── main.jsx             ← entry point
-    ├── App.jsx              ← ~310 lines, main app shell, routing, db helpers
-    ├── NetworkView.jsx      ← concentric rings graph (Obsidian-style local graph)
-    ├── MapView.jsx          ← Leaflet map with location clusters
-    ├── PersonForm.jsx       ← responsive tabbed form (Basic/Identity/Work/Profiles)
-    ├── TrustIndicator.jsx   ← traffic light badge component
-    ├── SVGTree.jsx          ← card-based chart view (backup, may not be active)
-    ├── supabase.js          ← client config
-    └── style.css            ← global styles + mobile breakpoints
+    ├── main.jsx           (11)   entry point
+    ├── App.jsx            (932)  ⚠ over the 800-line guardrail — see below
+    ├── supabase.js        (8)    client config
+    ├── NetworkView.jsx    (646)  Graph view — concentric rings (DEFAULT view)
+    ├── SVGTree.jsx        (472)  Tree view — ancestry-style card chart + shared tree helpers
+    ├── ExplorerView.jsx   (314)  Explorer view — Obsidian-style outline + linked notes
+    ├── MapView.jsx        (299)  Map view — Leaflet location clusters + migration lines
+    ├── PersonForm.jsx     (216)  add/edit modal — 4 tabs (Basic/Identity/Work/Profiles)
+    ├── StatsTab.jsx       (286)  completeness score, contributor leaderboard, branch coverage
+    ├── TrustIndicator.jsx (163)  traffic-light trust badges + flag/dispute forms
+    ├── RelationshipEngine.js (395) classifyRelationship + findPath (kinship term computation)
+    ├── LocalGraph.jsx     (542)  PARKED — radial hop graph, not rendered
+    └── style.css                 global styles + mobile breakpoints
 ```
 
-## Database Schema (Supabase)
+### ⚠ App.jsx is over the size guardrail
+CLAUDE.md mandates App.jsx stay under 800 lines; it is currently **932**. Next time it's touched substantially, extract components (the biggest candidates: `DetailPopup`, `AddReferralInline`, and the `db` object) into their own files. `SVGTree.jsx` exports `findRoots`, `getCoupleChildren`, and `getDisplayClan` for reuse — follow that pattern.
 
-### families table
+## Database Schema (verified against live DB, July 3, 2026)
+
+### families
 ```
 id              text PK
 name            text
-language        text DEFAULT 'english'    ← for relationship labels (Telugu/Hindi/Tamil/Kannada/English)
-historian       text DEFAULT ''           ← username of family maintainer
-historian_name  text DEFAULT ''
+historian       text DEFAULT ''      username of family maintainer
+historian_name  text DEFAULT ''      display name shown in header + leaderboard badge
 created_at      timestamptz
 ```
+> ⚠ **SCHEMA DRIFT — real latent bug.** The code reads `fam.language` and the header has a language dropdown that calls `db.updateFamily(id, { language })`, but the **`language` column does not exist on the live `families` table.** Reads silently fall back to `'english'`, but *changing* the language now throws a Postgres error — and since error-surfacing was added (commit `9239d2d`), that shows the user an alert. **Fix:** run `ALTER TABLE families ADD COLUMN language text DEFAULT 'english';` in the Supabase SQL Editor. (This is exactly the class of bug that bit us with `added_by` — the migration lives only as a comment in `supabase-schema.sql` and was never applied.)
 
-### persons table
+### persons  (the core table — every person is one row)
 ```
-id              text PK
+id              text PK              slug-style, from name + timestamp
 family_id       text FK → families
 name            text
-clan            text         ← intiperu/family name (BIRTH clan, never changes on marriage)
-gender          text (M/F)
-status          text (alive/deceased)
-generation      integer      ← relative, auto-shifts when ancestors added
-parent_id       text         ← points to ONE parent (blood parent in this family)
-spouse_id       text         ← bidirectional (if A→B then B→A)
-sort_order      integer      ← sibling ordering
-location        text         ← current city
-native_place    text         ← ancestral village
-gotra           text         ← exogamy identifier (distinct from clan)
-languages       text[]       ← array
-occupation      jsonb        ← {role, company}
-education       jsonb        ← [{institution, year, degree}]
-profiles        jsonb        ← {linkedin, facebook, instagram, whatsapp}
+clan            text                BIRTH clan (intiperu) — NEVER changes on marriage
+gender          text                'M' / 'F'
+status          text                'alive' / 'deceased'
+generation      integer             relative; auto-shifts when ancestors added above
+parent_id       text                ONE parent (the blood parent in this family)
+spouse_id       text                BIDIRECTIONAL (if A→B then B→A, always)
+sort_order      integer             sibling ordering
+location        text                current city
+native_place    text                ancestral village
+gotra           text                exogamy identifier (distinct from clan)
+languages       text[]
+occupation      jsonb               {role, company}
+education        jsonb              [{institution, year, degree}]
+profiles        jsonb               {linkedin, facebook, instagram, whatsapp}
 phone           text
 address         text
-role            text         ← family role description
+role            text                free-text family role
 notes           text
 verified        boolean
 birth_year      integer
 death_year      integer
-added_by        text         ← who created this record
-last_edited_by  text         ← who last modified
+added_by        text                who created the record
+last_edited_by  text                who last modified it
 created_at      timestamptz
 updated_at      timestamptz
 ```
 
-### referrals table (knowledge network overlay)
+### referrals  (KNA / knowledge-network overlay — "ask X about Y")
 ```
-id                  text PK
-family_id           text FK → families
-source_person_id    text     ← who KNOWS (who to ask)
-target_person_id    text     ← who they know ABOUT
-note                text     ← what they know ("has photos", "knows village history")
-added_by            text
-created_at          timestamptz
+id                text PK
+family_id         text FK → families
+source_person_id  text        who KNOWS (who to ask)
+target_person_id  text        who they know ABOUT
+note              text        what they know ("has old photos", "knows village history")
+added_by          text
+created_at        timestamptz
 ```
+Reads as: "to find out about [target], ask [source]." Rendered as dashed blue arrows in Graph view and as a "Linked from" backlinks section in Explorer. Currently 0 rows in production.
 
-### person_views table (trust engine)
+### person_views  (trust engine — who has seen a record)
 ```
 id          text PK
 family_id   text FK → families
 person_id   text
-viewed_by   text     ← username of viewer
+viewed_by   text          username of viewer
 viewed_at   timestamptz
 ```
 
-### disputes table (trust engine)
+### disputes  (trust engine — flagged fields)
 ```
-id              text PK
-family_id       text FK → families
-person_id       text
-field_name      text     ← which field is disputed
-current_value   text
-suggested_value text
-reason          text
-raised_by       text
-status          text (open/resolved)
-resolved_by     text
-resolution_note text
-created_at      timestamptz
-resolved_at     timestamptz
+id, family_id, person_id, field_name, current_value, suggested_value,
+reason, raised_by, status ('open'/'resolved'), resolved_by,
+resolution_note, created_at, resolved_at
 ```
 
-## Critical Data Rules (NEVER VIOLATE)
+All tables have RLS enabled with public read/write policies. Full DDL + migration history is in `supabase-schema.sql`.
 
-1. **Spouse links are bidirectional.** If A.spouse_id = B, then B.spouse_id = A. Always.
-2. **Clan is birth clan.** A married woman keeps her maiden clan. Sulochana's clan = "Veepuru" even after marrying Srinivasulu (Yeturu). Display as "VEEPURU → YETURU" on cards.
-3. **Children inherit father's clan.** When adding a child from mother's card, default clan = father's clan, parent_id = father's id.
-4. **Every person is a full node.** No text-only spouses. Married-in people are complete records.
-5. **Deceased are full nodes.** Never hide or skip them. Show with ✝, dashed borders, strikethrough.
-6. **Generation is relative.** Auto-shifts when ancestors are added above gen 0.
+## Critical Data Rules (NEVER VIOLATE — full list in CLAUDE.md)
 
-## Features Built
+1. **`spouse_id` is bidirectional.** Set both sides, always.
+2. **`clan` is the birth clan.** A married-in woman keeps her maiden clan (Sulochana stays "Veepuru" after marrying into Yeturu). Display bridges as "VEEPURU → YETURU".
+3. **A married-in spouse has NO `parent_id` in this family** — their parent belongs in their own family's tree. (Violating this is what caused the July 2 corruption — a drag set Malachamma's parent_id to her own husband, creating an infinite render loop.)
+4. **Children point to ONE parent** but appear under the couple (either parent's id matches).
+5. **Deceased are full nodes** — never hidden. Shown with ✝, dashed border, strikethrough.
+6. **Generation is relative** and auto-shifts when ancestors are added above gen 0.
 
-### Graph View (default) — Concentric Rings
-- Focus person at center, family radiates outward in 4 rings
-- Ring 1: spouse, parents, children
-- Ring 2: siblings, grandparents, grandchildren, children's spouses
-- Ring 3: in-law family (spouse's parents/siblings)
-- Ring 4: wider connected network
-- Left-click node = navigate (recenter on that person)
-- Right-click node = detail popup
-- Drag nodes to reposition (visual only, no data change)
-- Pan + zoom
-- Breadcrumb trail for navigation history
-- Trust rings on nodes (green = trusted, red pulsing = disputed)
+## Key Features (current state)
 
-### Map View
-- Leaflet/OpenStreetMap
-- Location clusters with family members
-- Migration lines (parent → child at different locations)
-- Spouse lines across cities
-- Click cluster popup → see members → right-click for detail
+### Four views, one shared data + edit pipeline
+The tree tab toggles between four renderers of the same `persons` array. **All four write through the same handlers in App.jsx** (`openEdit`, `openAdd`, `deletePerson`, `toggleVerified`, `relinkPersons`) — there is exactly one save path; a 5th view would wire into the same set.
 
-### Detail Popup (right-click)
-- Floating card near click position
-- Shows: name, clan, location, status, generation, age, spouse link, occupation, profiles, notes
-- Trust indicators (traffic light badges) on each field
-- Trust summary: viewer count, open disputes, resolved disputes
-- "Flag it" inline form for raising disputes
-- Action buttons: Add Father/Mother/Son/Daughter/Spouse, Edit, Delete
-- Attribution line: "Added by X, Edited by Y"
+- **Graph** (default, `NetworkView.jsx`) — concentric rings around a focus person. Ring 1 = spouse/parents/children, Ring 2 = siblings/grandparents/grandchildren, Ring 3 = in-laws, Ring 4 = wider network. Left-click recenters; right-click opens DetailPopup; breadcrumb history; trust rings on nodes.
+- **Tree** (`SVGTree.jsx`) — ancestry-style card chart, generations stacked top-to-bottom with connector lines. Drag cards to reposition (visual only). Restored from parked on 2026-07-02; in-law-overlap and cycle guards added.
+- **Explorer** (`ExplorerView.jsx`) — Obsidian-style. Left pane = collapsible folder-tree (expands fully by default); right pane = a text "note" per person with properties, auto-tags (from clan/gotra/location/languages — click to filter), `[[wiki-links]]` to relatives, a **backlinks** section from the referrals table, and an inline **ADD FAMILY** action row. **Drag-and-drop relinking:** drag a person's row onto another — drop near the top links them as spouses, near the bottom makes the dragged person a child. Confirmed + cycle-guarded.
+- **Map** (`MapView.jsx`) — Leaflet clusters by location, migration lines (parent→child across cities), spouse lines.
 
-### Person Form (modal)
-- 4 tabs: Basic, Identity, Work, Profiles
-- Responsive (flex-wrap, works on mobile)
-- Birth year + death year + auto-calculated age
-- Gender auto-set by button (Add Son = male, Add Daughter = female)
-- Sticky Save/Cancel buttons
+### DetailPopup (right-click, all views)
+Person info + trust badges per field, spouse card, occupation, profiles, notes, verified state, referral section, attribution line, and the Add Father/Mother/Spouse/Son/Daughter + Edit/Delete/Force-Delete actions. Father/Mother buttons hide once a parent exists (adding a grandparent = open the parent's own record).
 
 ### Trust Engine
-- Auto-records views when someone opens a person's detail
-- Trust badges: gray (unseen) → gold (1-2 viewers) → green (3+ viewers) → red (disputed)
-- Dispute flow: flag a field → suggest correction → historian resolves
-- Visual: pulsing red rings on disputed graph nodes, green rings on trusted ones
+Auto-records a view when a record is opened; badges go gray → gold → green with witness count, red when disputed. Flag-a-field → suggest correction → historian resolves. Consensus-through-overlapping-witnesses, per the paper.
 
-### Stats Dashboard
-- Completeness score (0-100%) with color-coded progress bar
-- Missing data breakdown (location, birth year, phone, etc.)
-- Contributor leaderboard with gold/silver/bronze ranks
-- Historian badge
-- Branch coverage per clan
-- Recent activity feed
-- Data trust overview (trusted/seen/disputed counts)
-- "Copy for WhatsApp" button with formatted share text
-
-### Knowledge Referrals
-- "Ask X about Y" — informal referral network
-- Stored in referrals table
-- Shown in detail popup under "Who knows about [person]?"
-- Rendered as blue dashed edges in graph view
+### Stats tab
+Completeness score (0–100, color-coded), missing-data breakdown, contributor leaderboard (with Historian badge), per-clan branch coverage, recent activity, "Copy for WhatsApp" share text.
 
 ### Export
-- JSON backup download (full fidelity)
-- GEDCOM export was in the artifact version, may need to be re-added to deployed version
+JSON backup download. (GEDCOM export is on the roadmap, not yet in the deployed app.)
 
-### Multi-Family
-- Home screen: create or select a family
-- Each family has isolated data (namespaced by family_id)
-- Language selector per family (English/Telugu/Hindi/Tamil/Kannada)
-- Cross-family links planned but not yet implemented
+## Recent Work (last 8 commits, newest first)
 
-## Key Design Decisions Made
+- `3f2d0f1` Explorer expands fully by default; dedupe married-in branches (Devi was rendering twice)
+- `fe417f7` Fix drag-drop data corruption + add cycle guards to Explorer & Tree renderers
+- `b05a2ae` Drag-and-drop relinking in Explorer; hide Father/Mother once a parent exists
+- `eb0addf` Inline add/edit/delete actions in Explorer notes
+- `11082af` Add Explorer view
+- `75a629b` Fix in-law card overlap in Tree view
+- `a10a2e3` Restore card-Tree view as 3rd toggle
+- `9239d2d` **Surface Supabase errors instead of failing silently** (the `db` object now alerts on any failed write — this is why the missing `language` column now shows an error)
 
-1. **Right-click popup instead of permanent side panel** — graph gets 100% width, detail appears on demand
-2. **Concentric rings instead of flat tree** — scales to any family size, implements the spectral paper's identity circles
-3. **No auth** — deliberate for now. Reduces friction for family members. Will need Google/phone OTP at 10+ families
-4. **Every spouse is a node** — rejected the text-label approach early. Essential for showing cross-family marriages
-5. **Maiden name always visible** — "PALLAMREDDY → YETURU" format shows marriage bridges at a glance
-6. **CLAUDE.md as memory** — Claude Code reads this at the start of every session for full context
-7. **Trust through structure, not blockchain** — overlapping witnesses + structural constraints make false data unstable
+## Known Issues / Next Steps
 
-## The Yeturu Family (Test Data)
-
-Jagan's family — the dogfooding dataset:
-- Root: Srinivasulu Reddy (Yeturu) ♥ Sulochana (Veepuru)
-- Jagan's generation: Jagan ♥ Swarnalatha (Pallamreddy), Kiran ♥ Devi (Chintakindi), Gayathri ✝ (Yeturu) ♥ Venkateswarlu (Allareddy)
-- In-law parents: Balarami Reddy (Pallamreddy) — Swarnalatha's father, Gopal Reddy (Chintakindi) — Devi's father
-- Gen 3: Sai Pranav, Krishna Kaushal, Prahas (Yeturu), Vijay Bharat, Anivarth (Allareddy)
-- Gayathri (Jagan's sister) is deceased — this was a key reason full spouse nodes were needed
-- ~19 members currently entered
-
-## What's NOT Built Yet (Priority Order)
-
-1. **Photos** — profile photos + old family photos tagged to people. Biggest engagement driver.
-2. **Events calendar** — auto-generate birthdays, anniversaries, death anniversaries from existing data
-3. **Cross-family bridge detection** — auto-link when two families share a marriage
-4. **WhatsApp bot** — "send a name, get back how you're related"
-5. **Wedding QR code** — printable family tree for weddings (growth mechanic)
-6. **Auth** — Google/phone OTP when multi-family usage grows
-7. **GEDCOM export** — was in the artifact, needs to be re-added to the deployed app
-8. **Mobile optimization** — PWA or React Native
-9. **Spectral analysis dashboard** — compute eigenvalues on the actual family graph data
+1. **Apply the `families.language` migration** (see schema-drift warning above) — highest-value quick fix.
+2. **Split App.jsx** — it's at 932 lines, over the 800 guardrail.
+3. **Roadmap (unbuilt, priority order):** photos (biggest engagement driver) → events calendar (auto birthdays/anniversaries) → cross-family bridge detection → WhatsApp "how am I related" bot → wedding QR-code tree → auth (when multi-family grows) → GEDCOM export → mobile/PWA → spectral-analysis dashboard on real graph data.
 
 ## How Jagan Works
 
-- NOT a deeply technical developer — prefers concise, actionable instructions
-- Uses THIS Claude.ai chat for design thinking and prompt writing (richer context)
-- Pastes prompts into Claude Code in VS Code for code execution
-- Two GitHub accounts: jeyreddy (this project), YJMREDDY (separate project, separate VS Code instance)
-- Git config per project folder to avoid account confusion
-- Workflow: design in chat → prompt for Claude Code → test locally → git push → Vercel auto-deploys
-
-## PRD Location
-
-A full PRD exists: was generated as `kula_vruksham_prd.md` during this session. It covers:
-- Problem statement, competitive landscape
-- Data model design rationale
-- Feature roadmap (4 phases over 24+ months)
-- Technical architecture (current + target)
-- Revenue model
-- Privacy & ethics considerations
-- Connection to spectral analysis paper
-- Dogfooding log
-
-## Files Generated This Session
-
-- `kulavruksham_prd.md` — grand PRD
-- `kulavruksham.jsx` — artifact versions (deprecated, superseded by deployed app)
-- `kulavruksham-project.tar.gz` — initial project scaffold
-- `App.jsx` — multiple iterations
+- Not a deeply technical developer — prefers concise, actionable steps over option-surveys.
+- Designs/thinks in the Claude.ai chat (richer product context), executes via Claude Code in VS Code.
+- Two GitHub accounts: **jeyreddy** (this project) and YJMREDDY (separate). Git config is per-folder to avoid mixups.
+- Workflow: design in chat → prompt Claude Code → `npm run build` (zero errors) → test locally → `git add/commit/push` → Vercel auto-deploys.
+- Values verification: changes are tested by actually running the app (Playwright drive scripts against `localhost:5173`) before shipping, and DB-mutating features are tested against real data with cleanup verified via direct Supabase queries.
 
 ## To Resume Work
 
-1. Open VS Code at C:\Tree
-2. `npm run dev` → http://localhost:5173
-3. Open Claude Code in VS Code
-4. First instruction to Claude Code: "Read CLAUDE.md first"
-5. Describe what you want → Claude Code edits files
-6. Test locally → `git add . && git commit -m "description" && git push`
-7. Vercel auto-deploys
-
-For design thinking and complex prompts, use Claude.ai (this chat has the full product context). For code execution, use Claude Code (it has CLAUDE.md for project context).
+1. Open VS Code at `C:\Tree`, `npm run dev`.
+2. In Claude Code, first instruction: **"Read CLAUDE.md first."**
+3. Describe the change → Claude Code edits → `npm run build` must pass → test locally → `git push` → Vercel deploys.
