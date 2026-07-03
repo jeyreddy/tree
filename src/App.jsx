@@ -7,6 +7,7 @@ import ExplorerView from './ExplorerView'
 import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
 import { DetailPopup } from './DetailPopup'
+import OnboardingFlow from './OnboardingFlow'
 
 const LABELS = {
   telugu:  { father: 'తండ్రి',  mother: 'తల్లి',   husband: 'భర్త',     wife: 'భార్య',    son: 'కొడుకు',  daughter: 'కూతురు',  children: 'పిల్లలు',      gotra: 'గోత్రం',     languages: 'భాషలు',     addFamily: 'కుటుంబం జోడించు' },
@@ -54,6 +55,7 @@ export default function App() {
   const [view, setView] = useState('graph')
   const [views, setViews] = useState([])
   const [disputes, setDisputes] = useState([])
+  const [onboarding, setOnboarding] = useState(null)
 
   // Boot
   useEffect(() => {
@@ -80,14 +82,37 @@ export default function App() {
     }
   }
 
-  const createFamily = async (name) => {
-    const id = makeId(name)
-    await db.createFamily(id, name.trim())
-    const historianFields = userName ? { historian: userName, historian_name: userName } : {}
-    if (userName) await db.updateFamily(id, historianFields)
-    const f = { id, name: name.trim(), ...historianFields }
+  // Creates the family, its historian, and the founding couple from the onboarding flow,
+  // then opens the family with the Graph centered on the couple (male = root, wife inline).
+  const completeOnboarding = async ({ familyName, userName: uName, male, female }) => {
+    const historian = uName.trim() || 'Anonymous'
+    setUserName(historian)
+    localStorage.setItem('kv-username', historian)
+
+    const famId = makeId(familyName)
+    await db.createFamily(famId, familyName.trim())
+    await db.updateFamily(famId, { historian, historian_name: historian })
+
+    const maleId = makeId(male.name)
+    const femaleId = makeId(female.name)
+    const malePerson = normalizePerson({
+      id: maleId, name: male.name, clan: male.clan, gender: 'M', status: 'alive',
+      generation: 0, parentId: null, spouseId: femaleId, sortOrder: 0,
+      addedBy: historian, lastEditedBy: historian,
+    })
+    const femalePerson = normalizePerson({
+      id: femaleId, name: female.name, clan: female.clan, gender: 'F', status: 'alive',
+      generation: 0, parentId: null, spouseId: maleId, sortOrder: 0,
+      addedBy: historian, lastEditedBy: historian,
+    })
+    await db.upsertPerson(PersonToRow(malePerson, famId))
+    await db.upsertPerson(PersonToRow(femalePerson, famId))
+
+    const f = { id: famId, name: familyName.trim(), historian, historian_name: historian }
     setFamilies(prev => [f, ...prev])
-    openFamily(f)
+    setOnboarding(null)
+    await openFamily(f)
+    setSel(maleId)
   }
 
   const refresh = useCallback(async () => {
@@ -227,7 +252,19 @@ export default function App() {
   }
 
   if (screen === 'loading') return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#999' }}>Loading…</div>
-  if (screen === 'home') return <HomeScreen families={families} onCreate={createFamily} onSelect={openFamily} />
+  if (screen === 'home') return (
+    <>
+      <HomeScreen families={families} onStartCreate={(name) => setOnboarding({ familyName: name.trim() })} onSelect={openFamily} />
+      {onboarding && (
+        <OnboardingFlow
+          familyName={onboarding.familyName}
+          initialUserName={userName}
+          onComplete={completeOnboarding}
+          onCancel={() => setOnboarding(null)}
+        />
+      )}
+    </>
+  )
 
   // ── FAMILY SCREEN ──
   const kids = selected ? getKids(selected.id) : []
@@ -508,7 +545,7 @@ export default function App() {
 }
 
 // ── HOME SCREEN ──
-function HomeScreen({ families, onCreate, onSelect }) {
+function HomeScreen({ families, onStartCreate, onSelect }) {
   const [newName, setNewName] = useState('')
   return (
     <div className="home">
@@ -521,8 +558,8 @@ function HomeScreen({ families, onCreate, onSelect }) {
         <div style={{ display: 'flex', gap: 8 }}>
           <input value={newName} onChange={e => setNewName(e.target.value)}
             placeholder="Family name — e.g. Yeturu, Sharma"
-            onKeyDown={e => e.key === 'Enter' && newName.trim() && onCreate(newName)} />
-          <button className="btn btn-dark" onClick={() => newName.trim() && onCreate(newName)}>Create</button>
+            onKeyDown={e => e.key === 'Enter' && newName.trim() && onStartCreate(newName)} />
+          <button className="btn btn-dark" onClick={() => newName.trim() && onStartCreate(newName)}>Create</button>
         </div>
       </div>
       {families.length > 0 && <div style={{ fontSize: 12, color: '#bbb', marginTop: 24, marginBottom: 8, fontWeight: 500 }}>EXISTING FAMILIES</div>}
