@@ -120,3 +120,11 @@ create index idx_persons_parent on persons(parent_id);
 -- CREATE POLICY "Public all disputes" ON disputes FOR ALL USING (true) WITH CHECK (true);
 -- CREATE INDEX idx_views_person ON person_views(person_id);
 -- CREATE INDEX idx_disputes_person ON disputes(person_id);
+
+-- ── Migration 2026-07-03: language backfill + photo + referral topic ──
+-- families.language existed in the base create-table above but was missing on
+-- databases created before it was added; this backfills those. photo_url and
+-- topic are new. Run these in the Supabase SQL Editor (IF NOT EXISTS = safe to re-run):
+-- ALTER TABLE families ADD COLUMN IF NOT EXISTS language text DEFAULT 'english';
+-- ALTER TABLE persons ADD COLUMN IF NOT EXISTS photo_url text;
+-- ALTER TABLE referrals ADD COLUMN IF NOT EXISTS topic text;
