@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { classifyRelationship, getWeightValue } from './RelationshipEngine'
+import RelationshipPathCard from './RelationshipPath'
 
 const CLAN_COLORS = ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D', '#7BAAAA', '#A0522D', '#708090']
 const RING_RADII = [0, 130, 260, 380, 490]
@@ -245,7 +246,16 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
   const [manualPositions, setManualPositions] = useState({})
   const [breadcrumbs, setBreadcrumbs] = useState([])
   const [showReferrals, setShowReferrals] = useState(true)
+  const [pathMode, setPathMode] = useState(false)
+  const [pick, setPick] = useState({ a: null, b: null })
   const dragStartPos = useRef(null)
+
+  const togglePathMode = () => { setPick({ a: null, b: null }); setPathMode(m => !m) }
+  const handlePick = (id) => {
+    if (!pick.a) { setPick({ a: id, b: null }); return }
+    if (id === pick.a) { setPathMode(false); setPick({ a: null, b: null }); return } // same node twice → cancel
+    setPick({ a: pick.a, b: id }); setPathMode(false)
+  }
   const panRef = useRef(false)
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
 
@@ -364,7 +374,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
     <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
       <svg
         ref={svgRef}
-        style={{ width: '100%', height: '100%', display: 'block', cursor: dragId ? 'grabbing' : 'grab', background: '#1a1a1f' }}
+        style={{ width: '100%', height: '100%', display: 'block', cursor: dragId ? 'grabbing' : pathMode ? 'crosshair' : 'grab', background: '#1a1a1f' }}
         onMouseDown={handleBgDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -473,8 +483,9 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
             const cc = getClanColor(titleCase(person.clan), allClans)
             const opacity = node.ring <= 2 ? 1 : node.ring === 3 ? 0.7 : 0.45
 
+            const isPicked = pathMode && node.id === pick.a
             return (
-              <g key={node.id} style={{ cursor: 'grab' }}
+              <g key={node.id} style={{ cursor: pathMode ? 'crosshair' : 'grab' }}
                 onMouseDown={e => {
                   if (e.button !== 0) return
                   e.stopPropagation()
@@ -488,7 +499,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                   if (dragStartPos.current) {
                     const dx = Math.abs(e.clientX - dragStartPos.current.x)
                     const dy = Math.abs(e.clientY - dragStartPos.current.y)
-                    if (dx < 5 && dy < 5) navigateTo(node.id)
+                    if (dx < 5 && dy < 5) { pathMode ? handlePick(node.id) : navigateTo(node.id) }
                   }
                   dragStartPos.current = null
                 }}
@@ -512,6 +523,12 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                 {isSelected && (
                   <circle cx={node.x} cy={node.y} r={node.r + 5}
                     fill="none" stroke="#4A6FA5" strokeWidth={2} opacity={0.6} pointerEvents="none" />
+                )}
+                {isPicked && (
+                  <circle cx={node.x} cy={node.y} r={node.r + 6}
+                    fill="none" stroke="#C4A35A" strokeWidth={3} pointerEvents="none">
+                    <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />
+                  </circle>
                 )}
                 {node.ring <= 2 && person.photoUrl ? (
                   <g pointerEvents="none" opacity={opacity}>
@@ -619,7 +636,11 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
         </g>
       </svg>
 
-      {/* KNA layer toggle */}
+      {/* Graph controls: relationship-path button + KNA toggle */}
+      <button onClick={togglePathMode}
+        style={{ position: 'absolute', bottom: 46, right: 10, background: pathMode ? '#C4A35A' : 'rgba(12,12,18,0.92)', color: pathMode ? '#1a1a1a' : '#ddd', border: 'none', borderRadius: 8, padding: '7px 11px', fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        {pathMode ? '✕ Cancel' : '🔗 How am I related?'}
+      </button>
       <div style={{ position: 'absolute', bottom: 10, right: 10, background: 'rgba(12,12,18,0.92)', borderRadius: 8, padding: '7px 11px', fontSize: 11, color: '#aaa' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={showReferrals} onChange={e => setShowReferrals(e.target.checked)}
@@ -627,6 +648,24 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
           <span><span style={{ color: '#378ADD' }}>··· </span>Show referrals</span>
         </label>
       </div>
+
+      {/* Two-pick mode indicator */}
+      {pathMode && (
+        <div style={{ position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)', background: '#C4A35A', color: '#1a1a1a', borderRadius: 20, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, boxShadow: '0 2px 10px rgba(0,0,0,0.35)', whiteSpace: 'nowrap', zIndex: 5, pointerEvents: 'none' }}>
+          {pick.a ? '② Now pick the second person' : '① Pick two people to see how they\'re related'}
+        </div>
+      )}
+
+      {/* Result card */}
+      {pick.a && pick.b && (
+        <RelationshipPathCard
+          aId={pick.a} bId={pick.b}
+          persons={persons}
+          language={fam?.language}
+          famId={fam?.id}
+          onClose={() => setPick({ a: null, b: null })}
+        />
+      )}
 
       {/* Breadcrumb trail */}
       {breadcrumbs.length > 0 && (
