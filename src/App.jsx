@@ -4,6 +4,7 @@ import { SVGTree, findRoots, getDisplayClan } from './SVGTree'
 import NetworkView from './NetworkView'
 import MapView from './MapView'
 import ExplorerView from './ExplorerView'
+import TimelineView from './TimelineView'
 import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
 import { DetailPopup } from './DetailPopup'
@@ -410,6 +411,10 @@ export default function App() {
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'explorer' ? '#1a1a1a' : 'transparent', color: view === 'explorer' ? '#fff' : '#999' }}>
                     Explorer
                   </button>
+                  <button onClick={() => setView('timeline')}
+                    style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'timeline' ? '#1a1a1a' : 'transparent', color: view === 'timeline' ? '#fff' : '#999' }}>
+                    Timeline
+                  </button>
                   <button onClick={() => setView('map')}
                     style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 0, background: view === 'map' ? '#1a1a1a' : 'transparent', color: view === 'map' ? '#fff' : '#999' }}>
                     Map
@@ -452,6 +457,12 @@ export default function App() {
                   onVerify={toggleVerified}
                   onRelink={relinkPersons}
                   REL={REL}
+                />
+              ) : view === 'timeline' ? (
+                <TimelineView
+                  persons={persons}
+                  setSel={id => { setSel(id); setSearch('') }}
+                  onContextMenu={handleContextMenu}
                 />
               ) : (
                 <NetworkView
