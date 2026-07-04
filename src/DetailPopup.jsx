@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { TrustIndicator, TrustSummary, FlagItForm } from './TrustIndicator'
 import { classifyRelationship, findPath } from './RelationshipEngine'
-import { db } from './db'
-import { AddReferralInline } from './AddReferralInline'
+import { ReferralSection } from './ReferralSection'
 
 export function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals, views = [], disputes = [], historianName = '', onAddDispute, onResolveDispute, onAutoView, fam = null, focusId = null }) {
   useEffect(() => { if (onAutoView && person?.id) onAutoView(person.id) }, [person?.id])
@@ -100,6 +99,17 @@ export function DetailPopup({ person, position, persons, REL, onClose, onEdit, o
           )}
         </div>
 
+        {/* KNA prompt — kept high in the popup so it's visible without scrolling (adoption driver) */}
+        <ReferralSection
+          target={person}
+          persons={persons}
+          referrals={referrals}
+          setReferrals={setReferrals}
+          familyId={familyId}
+          userName={userName}
+          onNavigate={onFocus}
+        />
+
         {spouse && (
           <div onClick={() => { onClose(); setTimeout(() => onFocus(spouse.id), 50) }}
             style={{ background: '#fdf8f2', borderRadius: 8, padding: '8px 10px', marginBottom: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -175,45 +185,6 @@ export function DetailPopup({ person, position, persons, REL, onClose, onEdit, o
 
         <TrustSummary person={person} views={views} disputes={disputes} userName={userName} historianName={historianName} onResolveDispute={onResolveDispute} />
         <FlagItForm person={person} familyId={familyId} userName={userName} onAdd={onAddDispute} />
-
-        {/* Knowledge referrals */}
-        <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-          <div style={{ fontSize: 10, color: '#bbb', fontWeight: 500, marginBottom: 4 }}>
-            WHO KNOWS ABOUT {person.name.split(' ')[0].toUpperCase()}?
-          </div>
-          {referrals.filter(r => r.target_person_id === person.id).map(ref => {
-            const source = persons.find(p => p.id === ref.source_person_id)
-            return (
-              <div key={ref.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', marginBottom: 3, background: '#f0f8ff', borderRadius: 6, fontSize: 11 }}>
-                <span style={{ color: '#4A6FA5', fontWeight: 600 }}>Ask {source?.name || 'Unknown'}</span>
-                {ref.note && <span style={{ color: '#999' }}>— {ref.note}</span>}
-                <button onClick={async () => { await db.deleteReferral(ref.id); setReferrals(prev => prev.filter(r => r.id !== ref.id)) }}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#ddd', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
-              </div>
-            )
-          })}
-          {referrals.filter(r => r.source_person_id === person.id).length > 0 && (
-            <div style={{ marginTop: 4 }}>
-              <div style={{ fontSize: 9, color: '#ccc', marginBottom: 2 }}>{person.name.split(' ')[0]} knows about:</div>
-              {referrals.filter(r => r.source_person_id === person.id).map(ref => {
-                const target = persons.find(p => p.id === ref.target_person_id)
-                return (
-                  <span key={ref.id} style={{ fontSize: 10, color: '#4A6FA5', marginRight: 6, cursor: 'pointer' }}
-                    onClick={() => { onClose(); onFocus(ref.target_person_id) }}>
-                    {target?.name || '?'}
-                  </span>
-                )
-              })}
-            </div>
-          )}
-          <AddReferralInline
-            targetId={person.id}
-            persons={persons}
-            familyId={familyId}
-            userName={userName}
-            onAdd={async (ref) => { await db.addReferral(ref); setReferrals(prev => [...prev, ref]) }}
-          />
-        </div>
 
         {(person.addedBy || person.lastEditedBy) && (
           <div style={{ fontSize: 9, color: '#bbb', marginTop: 8, borderTop: '1px solid #f5f5f5', paddingTop: 6 }}>

@@ -245,21 +245,32 @@ function PersonNote({ person, persons, referrals, setSel, onContextMenu, setTagF
         </>
       )}
 
-      {(knowsAbout.length > 0 || knownBy.length > 0) && (
+      {knownBy.length > 0 && (
         <>
           <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #eee' }} />
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', marginBottom: 8 }}>Linked from</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', marginBottom: 8 }}>Referenced by</div>
+          <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+            {knownBy.map(r => (
+              <div key={r.id} style={{ color: '#777' }}>
+                <PersonLink id={r.source_person_id} persons={persons} setSel={setSel} /> knows about
+                {r.topic && <span style={{ fontWeight: 600, color: '#3c6cb0' }}> {r.topic}</span>}
+                {r.note && <span style={{ color: '#999' }}>: {r.note}</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {knowsAbout.length > 0 && (
+        <>
+          <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #eee' }} />
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', marginBottom: 8 }}>Knowledge contributions</div>
           <div style={{ fontSize: 13, lineHeight: 1.9 }}>
             {knowsAbout.map(r => (
               <div key={r.id} style={{ color: '#777' }}>
-                → knows about <PersonLink id={r.target_person_id} persons={persons} setSel={setSel} />
-                {r.note && <span style={{ color: '#bbb' }}> — {r.note}</span>}
-              </div>
-            ))}
-            {knownBy.map(r => (
-              <div key={r.id} style={{ color: '#777' }}>
-                ← <PersonLink id={r.source_person_id} persons={persons} setSel={setSel} /> knows about this
-                {r.note && <span style={{ color: '#bbb' }}> — {r.note}</span>}
+                Knows about <PersonLink id={r.target_person_id} persons={persons} setSel={setSel} />
+                {r.topic && <span style={{ fontWeight: 600, color: '#3c6cb0' }}> — {r.topic}</span>}
+                {r.note && <span style={{ color: '#999' }}>: {r.note}</span>}
               </div>
             ))}
           </div>

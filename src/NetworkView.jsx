@@ -244,6 +244,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [manualPositions, setManualPositions] = useState({})
   const [breadcrumbs, setBreadcrumbs] = useState([])
+  const [showReferrals, setShowReferrals] = useState(true)
   const dragStartPos = useRef(null)
   const panRef = useRef(false)
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
@@ -326,11 +327,13 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
     if (p.parentId && nodeIds.has(p.parentId)) edges.push({ source: p.parentId, target: p.id, type: 'parent' })
     if (p.spouseId && nodeIds.has(p.spouseId) && p.id < p.spouseId) edges.push({ source: p.id, target: p.spouseId, type: 'spouse' })
   })
-  referrals.forEach(r => {
-    if (nodeIds.has(r.source_person_id) && nodeIds.has(r.target_person_id)) {
-      edges.push({ source: r.source_person_id, target: r.target_person_id, type: 'referral' })
-    }
-  })
+  if (showReferrals) {
+    referrals.forEach(r => {
+      if (nodeIds.has(r.source_person_id) && nodeIds.has(r.target_person_id)) {
+        edges.push({ source: r.source_person_id, target: r.target_person_id, type: 'referral' })
+      }
+    })
+  }
 
   const handleBgDown = (e) => {
     if (e.button !== 0) return
@@ -371,8 +374,8 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
           <pattern id="ringdot" width="20" height="20" patternUnits="userSpaceOnUse">
             <circle cx="10" cy="10" r="0.4" fill="#252528" />
           </pattern>
-          <marker id="ref-nv" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="#4A6FA5" opacity="0.6" />
+          <marker id="ref-nv" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L0,7 L7,3.5 z" fill="#378ADD" opacity="0.6" />
           </marker>
         </defs>
         <rect width="100%" height="100%" fill="url(#ringdot)" />
@@ -414,8 +417,8 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                 <line key={i} pointerEvents="none"
                   x1={a.x} y1={a.y}
                   x2={b.x - (dx / d) * (b.r + 6)} y2={b.y - (dy / d) * (b.r + 6)}
-                  stroke="#4A6FA5" strokeWidth={1} opacity={0.35}
-                  strokeDasharray="3,3" markerEnd="url(#ref-nv)" />
+                  stroke="#378ADD" strokeWidth={1.5} opacity={0.5}
+                  strokeDasharray="6 3" markerEnd="url(#ref-nv)" />
               )
             }
 
@@ -616,6 +619,15 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
         </g>
       </svg>
 
+      {/* KNA layer toggle */}
+      <div style={{ position: 'absolute', bottom: 10, right: 10, background: 'rgba(12,12,18,0.92)', borderRadius: 8, padding: '7px 11px', fontSize: 11, color: '#aaa' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={showReferrals} onChange={e => setShowReferrals(e.target.checked)}
+            style={{ width: 15, height: 15, accentColor: '#378ADD', cursor: 'pointer' }} />
+          <span><span style={{ color: '#378ADD' }}>··· </span>Show referrals</span>
+        </label>
+      </div>
+
       {/* Breadcrumb trail */}
       {breadcrumbs.length > 0 && (
         <div style={{
@@ -658,7 +670,7 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 12px' }}>
           <span style={{ color: '#555' }}>── Parent-Child</span>
           <span style={{ color: '#E8A87C' }}>── ♥ Spouse</span>
-          <span style={{ color: '#4A6FA5' }}>··· Knows about</span>
+          <span style={{ color: '#378ADD' }}>··▶ Knows about</span>
         </div>
         <div style={{ marginTop: 2, color: '#3a3a44', fontSize: 9 }}>Click to re-center · Right-click for details · Drag to reposition</div>
       </div>
