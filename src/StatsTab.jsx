@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 const CLAN_COLORS = ['#C4A35A', '#6B8E6B', '#5C7FB5', '#9B6BA0', '#C97B5D', '#7BAAAA', '#A0522D', '#708090']
 
 function titleCase(str) {
@@ -103,6 +105,82 @@ function computeRecentActivity(persons) {
     }))
 }
 
+// Actionable gaps — the six fields worth nudging on. Sorted by count (bigger gap = bigger
+// impact on completeness). native_place isn't in the score but is still worth chasing.
+function computeGaps(persons) {
+  const defs = [
+    { field: 'birth_year',   label: 'birth year',   icon: '📅', has: p => !!p.birthYear },
+    { field: 'native_place', label: 'native place', icon: '🏡', has: p => !!p.nativePlace },
+    { field: 'clan',         label: 'clan',         icon: '🏷', has: p => !!p.clan },
+    { field: 'photo',        label: 'photo',        icon: '📷', has: p => !!p.photoUrl },
+    { field: 'phone',        label: 'phone number', icon: '📱', has: p => !!p.phone },
+    { field: 'occupation',   label: 'occupation',   icon: '💼', has: p => !!(p.occupation?.role || p.occupation?.company) },
+  ]
+  return defs
+    .map(d => ({ field: d.field, label: d.label, icon: d.icon, count: persons.filter(p => !d.has(p)).length }))
+    .filter(g => g.count > 0)
+    .sort((a, b) => b.count - a.count)
+}
+
+function nudgeWhatsApp(label, count, fam) {
+  const link = `${window.location.origin}${window.location.pathname}?family=${fam?.id || ''}`
+  const subject = count === 1 ? 'person is' : 'people are'
+  const message = `Help us fill in our family tree! ${count} ${subject} missing their ${label}. Can you help? ${link}`
+  window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+}
+
+function computeReferralStats(persons, referrals) {
+  const nameOf = id => persons.find(p => p.id === id)?.name || 'Unknown'
+  const byTopicMap = {}, targetCount = {}, sourceTargets = {}
+  referrals.forEach(r => {
+    const topic = r.topic || 'Other'
+    byTopicMap[topic] = (byTopicMap[topic] || 0) + 1
+    targetCount[r.target_person_id] = (targetCount[r.target_person_id] || 0) + 1
+    if (!sourceTargets[r.source_person_id]) sourceTargets[r.source_person_id] = new Set()
+    sourceTargets[r.source_person_id].add(r.target_person_id)
+  })
+  return {
+    total: referrals.length,
+    byTopic: Object.entries(byTopicMap).map(([topic, count]) => ({ topic, count })).sort((a, b) => b.count - a.count),
+    mostReferenced: Object.entries(targetCount).map(([id, count]) => ({ name: nameOf(id), count })).sort((a, b) => b.count - a.count).slice(0, 3),
+    topHolders: Object.entries(sourceTargets).map(([id, set]) => ({ name: nameOf(id), count: set.size })).sort((a, b) => b.count - a.count).slice(0, 3),
+  }
+}
+
+// Week-over-week. "This week" = last 7 days, "last week" = 7–14 days ago.
+// No historical snapshots exist, so the completeness delta approximates by comparing the
+// current score to the score of just the members who existed before this week.
+function computeWeeklyPulse(persons, referrals) {
+  const now = Date.now(), WK = 7 * 24 * 60 * 60 * 1000
+  const age = t => t ? now - new Date(t).getTime() : Infinity
+  const thisWk = t => age(t) < WK
+  const lastWk = t => { const a = age(t); return a >= WK && a < 2 * WK }
+  const currentScore = computeCompleteness(persons).score
+  const baseline = persons.filter(p => age(p.created_at) >= WK)
+  const baselineScore = baseline.length ? computeCompleteness(baseline).score : currentScore
+  return {
+    addedThisWeek: persons.filter(p => thisWk(p.created_at)).length,
+    addedLastWeek: persons.filter(p => lastWk(p.created_at)).length,
+    refsThisWeek: referrals.filter(r => thisWk(r.created_at)).length,
+    refsLastWeek: referrals.filter(r => lastWk(r.created_at)).length,
+    scoreDelta: currentScore - baselineScore,
+    currentScore,
+  }
+}
+
+function PulseStat({ label, value, prev }) {
+  const delta = value - prev
+  return (
+    <div style={{ background: '#fafafa', borderRadius: 10, padding: '12px 8px', textAlign: 'center', border: '1px solid #f0f0f0' }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: '#333' }}>{value}</div>
+      <div style={{ fontSize: 10, color: '#999', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 9, color: delta > 0 ? '#5B7553' : delta < 0 ? '#dc3545' : '#bbb' }}>
+        {delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '='} vs last wk ({prev})
+      </div>
+    </div>
+  )
+}
+
 function fallbackCopy(text) {
   const ta = document.createElement('textarea')
   ta.value = text
@@ -113,11 +191,15 @@ function fallbackCopy(text) {
   alert('Copied! Paste in WhatsApp.')
 }
 
-export default function StatsTab({ persons, fam, views = [], disputes = [] }) {
+export default function StatsTab({ persons, fam, views = [], disputes = [], referrals = [] }) {
+  const [showAllGaps, setShowAllGaps] = useState(false)
   const { score: completenessScore, missing: missingData } = computeCompleteness(persons)
   const contributors = computeContributors(persons)
   const branchStats = computeBranchStats(persons)
   const recentActivity = computeRecentActivity(persons)
+  const gaps = computeGaps(persons)
+  const refStats = computeReferralStats(persons, referrals)
+  const pulse = computeWeeklyPulse(persons, referrals)
 
   const trustedCount = persons.filter(p => {
     const unique = [...new Set(views.filter(v => v.person_id === p.id).map(v => v.viewed_by))].length
@@ -131,6 +213,40 @@ export default function StatsTab({ persons, fam, views = [], disputes = [] }) {
 
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
+
+      {/* ── GAP NUDGES ── */}
+      {gaps.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Fill the gaps</h2>
+          <p style={{ fontSize: 12, color: '#999', marginBottom: 12 }}>Biggest gaps first — nudge the family to help complete them.</p>
+          {gaps.slice(0, 5).map(g => (
+            <div key={g.field} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', marginBottom: 8, background: '#fff', border: '1px solid #eef1f6', borderRadius: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 18 }}>{g.icon}</span>
+              <div style={{ flex: '1 1 130px', minWidth: 0, fontSize: 14, fontWeight: 700, color: '#333' }}>
+                {g.count} {g.count === 1 ? 'person' : 'people'} missing {g.label}
+              </div>
+              <button onClick={() => nudgeWhatsApp(g.label, g.count, fam)}
+                style={{ minHeight: 44, padding: '0 16px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                Nudge via WhatsApp
+              </button>
+            </div>
+          ))}
+          <button onClick={() => setShowAllGaps(v => !v)}
+            style={{ background: 'none', border: 'none', color: '#4A6FA5', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: '6px 0' }}>
+            {showAllGaps ? 'Hide full breakdown ▲' : 'Show all gaps ▾'}
+          </button>
+          {showAllGaps && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              {missingData.map(({ label, count, icon }) => (
+                <div key={label} style={{ background: '#fafafa', borderRadius: 8, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #f0f0f0' }}>
+                  <span style={{ fontSize: 15 }}>{icon}</span>
+                  <div style={{ fontSize: 12, color: '#555' }}><strong>{count}</strong> {label}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── COMPLETENESS SCORE ── */}
       <div style={{ marginBottom: 24 }}>
@@ -226,6 +342,45 @@ export default function StatsTab({ persons, fam, views = [], disputes = [] }) {
         ))}
       </div>
 
+      {/* ── KNOWLEDGE NETWORK (KNA) ── */}
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Knowledge Network</h2>
+        {refStats.total === 0 ? (
+          <div style={{ color: '#aaa', fontSize: 13, textAlign: 'center', padding: '18px 12px', background: '#fafafa', borderRadius: 10 }}>
+            No knowledge referrals yet. Open any person's detail and tag who knows about them.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 13, color: '#555', marginBottom: 10 }}>
+              <strong style={{ fontSize: 22, color: '#378ADD' }}>{refStats.total}</strong> referral{refStats.total !== 1 ? 's' : ''} tracked
+            </div>
+            {refStats.byTopic.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                {refStats.byTopic.map(t => (
+                  <span key={t.topic} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 12, background: '#eaf2fb', color: '#2c5aa0', fontWeight: 600 }}>
+                    {t.topic}: {t.count}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#bbb', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Most referenced</div>
+                {refStats.mostReferenced.map((m, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: '#555', marginBottom: 3 }}><strong>{m.name}</strong> <span style={{ color: '#aaa' }}>· {m.count} about them</span></div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#bbb', fontWeight: 700, textTransform: 'uppercase', marginBottom: 5 }}>Knowledge holders</div>
+                {refStats.topHolders.map((h, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: '#555', marginBottom: 3 }}><strong>{h.name}</strong> <span style={{ color: '#aaa' }}>knows {h.count}</span></div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* ── BRANCH COVERAGE ── */}
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Branch Coverage</h2>
@@ -262,6 +417,22 @@ export default function StatsTab({ persons, fam, views = [], disputes = [] }) {
             </span>
           </div>
         ))}
+      </div>
+
+      {/* ── WEEKLY PULSE ── */}
+      <div style={{ marginBottom: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>This Week</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <PulseStat label="People added" value={pulse.addedThisWeek} prev={pulse.addedLastWeek} />
+          <PulseStat label="Referrals" value={pulse.refsThisWeek} prev={pulse.refsLastWeek} />
+          <div style={{ background: '#fafafa', borderRadius: 10, padding: '12px 8px', textAlign: 'center', border: '1px solid #f0f0f0' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: pulse.scoreDelta > 0 ? '#5B7553' : pulse.scoreDelta < 0 ? '#dc3545' : '#999' }}>
+              {pulse.scoreDelta > 0 ? '↑' : pulse.scoreDelta < 0 ? '↓' : '–'}{Math.abs(pulse.scoreDelta)}%
+            </div>
+            <div style={{ fontSize: 10, color: '#999', fontWeight: 600 }}>Completeness</div>
+            <div style={{ fontSize: 9, color: '#bbb' }}>now {pulse.currentScore}%</div>
+          </div>
+        </div>
       </div>
 
       {/* ── SHARE ── */}

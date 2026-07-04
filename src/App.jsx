@@ -559,7 +559,7 @@ export default function App() {
 
       {tab === 'stats' && (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          <StatsTab persons={persons} fam={fam} views={views} disputes={disputes} />
+          <StatsTab persons={persons} fam={fam} views={views} disputes={disputes} referrals={referrals} />
         </div>
       )}
 
