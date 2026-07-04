@@ -57,9 +57,22 @@ export default function App() {
   const [disputes, setDisputes] = useState([])
   const [onboarding, setOnboarding] = useState(null)
 
-  // Boot
+  // Boot — deep link: ?family=<id> opens that family directly, skipping HomeScreen
   useEffect(() => {
-    db.getFamilies().then(f => { setFamilies(f); setScreen('home') })
+    const params = new URLSearchParams(window.location.search)
+    const familyId = params.get('family')
+    db.getFamilies().then(fams => {
+      setFamilies(fams)
+      if (familyId) {
+        // Strip the param so it doesn't stick on back-navigation / refresh
+        params.delete('family')
+        const qs = params.toString()
+        window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
+        const match = fams.find(f => f.id === familyId)
+        if (match) { openFamily(match); return }
+      }
+      setScreen('home')
+    })
   }, [])
 
   const openFamily = async (f) => {
@@ -286,16 +299,31 @@ export default function App() {
   const rootIds = findRoots(persons)
   const addRootAction = persons.length > 0 ? () => setMode({ type: 'add', dir: 'child', parentId: null }) : undefined
 
+  const shareInvite = () => {
+    const link = `${window.location.origin}${window.location.pathname}?family=${fam.id}`
+    const message = `I'm building our ${fam.name} family tree on Kula Vruksham. ${persons.length} people added so far. Can you add your branch? ${link}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div className="header">
         <button className="header-back" onClick={async () => { setScreen('home'); setFamilies(await db.getFamilies()) }}>←</button>
-        <div style={{ flex: 1 }}>
-          <div className="header-title">{fam.name}</div>
-          <div className="header-sub">
-            {persons.length} members
-            {fam.historian_name && <span> · Maintained by <strong>{fam.historian_name}</strong></span>}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="header-title">{fam.name}</div>
+            <div className="header-sub">
+              {persons.length} members
+              {fam.historian_name && <span> · Maintained by <strong>{fam.historian_name}</strong></span>}
+            </div>
           </div>
+          <button
+            onClick={shareInvite}
+            title="Invite family on WhatsApp"
+            style={{ flexShrink: 0, padding: '3px 9px', fontSize: 11, fontWeight: 600, background: 'rgba(37,211,102,0.15)', color: '#25D366', border: '1px solid rgba(37,211,102,0.35)', borderRadius: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            ↗ Invite
+          </button>
         </div>
         <div className="header-tabs">
           <span
