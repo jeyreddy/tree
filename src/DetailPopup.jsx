@@ -26,6 +26,13 @@ export function DetailPopup({ person, position, persons, REL, onClose, onEdit, o
       }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 8, right: 10, background: 'none', border: 'none', fontSize: 20, color: '#ccc', cursor: 'pointer', lineHeight: 1 }}>×</button>
 
+        {person.photoUrl && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+            <img src={person.photoUrl} alt={person.name}
+              style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', border: dead ? '2px dashed #ccc' : '2px solid #eee', filter: dead ? 'grayscale(0.4)' : 'none' }} />
+          </div>
+        )}
+
         <div style={{ fontSize: 17, fontWeight: 700, color: dead ? '#aaa' : '#1a1a1a', textDecoration: dead ? 'line-through' : 'none', marginBottom: 2, paddingRight: 24 }}>
           {dead ? '✝ ' : ''}{person.name}<TrustIndicator personId={person.id} fieldName="name" views={views} disputes={disputes} />
         </div>

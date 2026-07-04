@@ -1,4 +1,25 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+
+// Client-side resize/compress before upload: caps width at maxW, re-encodes as JPEG
+// at the given quality. Keeps uploads well under the 2MB free-tier storage limit.
+function compressImage(file, maxW = 500, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const scale = Math.min(1, maxW / img.width)
+      const w = Math.max(1, Math.round(img.width * scale))
+      const h = Math.max(1, Math.round(img.height * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('Compression failed')), 'image/jpeg', quality)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image')) }
+    img.src = url
+  })
+}
 
 export default function PersonForm({ mode, persons, fam, onSave, onCancel }) {
   const isEdit = mode.type === 'edit'
@@ -25,6 +46,25 @@ export default function PersonForm({ mode, persons, fam, onSave, onCancel }) {
   })
   const [ftab, setFtab] = useState('basic')
   const u = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }))
+
+  const fileRef = useRef(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const photoSrc = f.photoPreview || f.photoUrl
+  const onPickPhoto = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return alert('Please choose a JPG, PNG, or WebP image.')
+    setPhotoBusy(true)
+    try {
+      const blob = await compressImage(file)
+      setF(p => ({ ...p, photoBlob: blob, photoExt: 'jpg', photoPreview: URL.createObjectURL(blob) }))
+    } catch {
+      alert('Could not process that image. Please try another one.')
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
   const title = isEdit ? `Edit ${f.name}` : isAnc ? '↑ Add ancestor' : isSp ? '♥ Add spouse' : '↓ Add ' + (target ? `under ${target.name}` : 'first person')
   const thisYear = new Date().getFullYear()
 
@@ -45,6 +85,28 @@ export default function PersonForm({ mode, persons, fam, onSave, onCancel }) {
       </div>
 
       {ftab === 'basic' && <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+          <div onClick={() => !photoBusy && fileRef.current?.click()}
+            style={{ width: 72, height: 72, borderRadius: '50%', flexShrink: 0, cursor: 'pointer', background: '#f0f0f0', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e0e0e0' }}>
+            {photoSrc
+              ? <img src={photoSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: 26, color: '#ccc' }}>📷</span>}
+          </div>
+          <div>
+            <button type="button" className="btn btn-grey btn-sm" onClick={() => !photoBusy && fileRef.current?.click()}>
+              {photoBusy ? 'Processing…' : photoSrc ? 'Change photo' : 'Add photo'}
+            </button>
+            {photoSrc && (
+              <button type="button" onClick={() => setF(p => ({ ...p, photoUrl: '', photoBlob: null, photoPreview: null }))}
+                style={{ marginLeft: 8, background: 'none', border: 'none', color: '#c0392b', fontSize: 12, cursor: 'pointer' }}>
+                Remove
+              </button>
+            )}
+            <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>JPG, PNG or WebP</div>
+          </div>
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={onPickPhoto} style={{ display: 'none' }} />
+        </div>
+
         <div style={{ marginBottom: 12 }}>
           <label className="label">Name *</label>
           <input value={f.name || ''} onChange={u('name')} style={{ fontSize: 15, padding: '12px' }} />

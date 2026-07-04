@@ -8,7 +8,7 @@ function titleCase(str) {
 function computeCompleteness(persons) {
   if (persons.length === 0) return { score: 0, missing: [] }
   let totalFields = 0, filledFields = 0
-  const checks = { missingLocation: 0, missingBirthYear: 0, missingClan: 0, missingPhone: 0, missingSpouse: 0, unverified: 0, missingOccupation: 0, missingProfiles: 0 }
+  const checks = { missingLocation: 0, missingBirthYear: 0, missingClan: 0, missingPhone: 0, missingSpouse: 0, unverified: 0, missingOccupation: 0, missingProfiles: 0, missingPhoto: 0 }
   const thisYear = new Date().getFullYear()
   persons.forEach(p => {
     totalFields += 6
@@ -25,6 +25,8 @@ function computeCompleteness(persons) {
     if (p.occupation?.role || p.occupation?.company) filledFields++; else checks.missingOccupation++
     const hasAnyProfile = p.profiles && Object.values(p.profiles).some(v => v)
     if (hasAnyProfile) filledFields++; else checks.missingProfiles++
+    totalFields += 1
+    if (p.photoUrl) filledFields++; else checks.missingPhoto++
   })
   const score = totalFields > 0 ? Math.round(filledFields / totalFields * 100) : 0
   const missing = [
@@ -36,6 +38,7 @@ function computeCompleteness(persons) {
     { label: 'no occupation', count: checks.missingOccupation, icon: '💼' },
     { label: 'no social profiles', count: checks.missingProfiles, icon: '🔗' },
     { label: 'missing clan', count: checks.missingClan, icon: '🏷' },
+    { label: 'no photo', count: checks.missingPhoto, icon: '📷' },
   ].filter(m => m.count > 0).sort((a, b) => b.count - a.count)
   return { score, missing }
 }

@@ -69,8 +69,16 @@ function TreeRow({ id, depth, persons, sel, setSel, expanded, setExpanded, onCon
         <span onClick={toggle} style={{ width: 14, fontSize: 10, color: '#bbb', cursor: hasKids ? 'pointer' : 'default', textAlign: 'center', flexShrink: 0 }}>
           {hasKids ? (isOpen ? '▾' : '▸') : '·'}
         </span>
-        <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500 }}>
-          {(isDead ? '✝ ' : '') + person.name}{spouse ? ` & ${spouse.name}` : ''}
+        <Avatar person={person} />
+        <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+          {(isDead ? '✝ ' : '') + person.name}
+          {spouse && (
+            <>
+              <span style={{ margin: '0 5px', color: '#ccc', fontWeight: 400 }}>&</span>
+              <Avatar person={spouse} />
+              {(spouse.status === 'deceased' ? '✝ ' : '') + spouse.name}
+            </>
+          )}
         </span>
         {isDropTarget && (
           <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: dropMode === 'child' ? '#5B7553' : '#4A6FA5' }}>
@@ -105,9 +113,18 @@ function SatelliteLeaf({ person, persons, sel, setSel, depth, onContextMenu }) {
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu?.(person.id, e) }}
     >
       <span style={{ width: 14, flexShrink: 0 }} />
+      <Avatar person={person} />
       <span style={{ fontSize: 13 }}>{(isDead ? '✝ ' : '') + person.name}</span>
       {spouse && <span style={{ fontSize: 10, color: '#bbb', marginLeft: 4 }}>married to {spouse.name}</span>}
     </div>
+  )
+}
+
+function Avatar({ person, size = 32 }) {
+  if (!person.photoUrl) return null
+  return (
+    <img src={person.photoUrl} alt=""
+      style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, marginRight: 8, border: '1px solid #eee' }} />
   )
 }
 

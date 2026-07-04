@@ -510,25 +510,46 @@ export default function NetworkView({ persons, sel, setSel, onContextMenu, refer
                   <circle cx={node.x} cy={node.y} r={node.r + 5}
                     fill="none" stroke="#4A6FA5" strokeWidth={2} opacity={0.6} pointerEvents="none" />
                 )}
-                <circle cx={node.x} cy={node.y} r={node.r}
-                  fill={dead ? 'transparent' : cc}
-                  stroke={dead ? cc : 'none'}
-                  strokeWidth={dead ? 1.5 : 0}
-                  strokeDasharray={dead ? '4,2' : undefined}
-                  opacity={opacity} pointerEvents="none" />
-                {dead && (
-                  <g pointerEvents="none" opacity={opacity * 0.6}>
-                    <line x1={node.x - node.r * 0.35} y1={node.y - node.r * 0.35}
-                      x2={node.x + node.r * 0.35} y2={node.y + node.r * 0.35}
-                      stroke={cc} strokeWidth={1.5} />
-                    <line x1={node.x + node.r * 0.35} y1={node.y - node.r * 0.35}
-                      x2={node.x - node.r * 0.35} y2={node.y + node.r * 0.35}
-                      stroke={cc} strokeWidth={1.5} />
+                {node.ring <= 2 && person.photoUrl ? (
+                  <g pointerEvents="none" opacity={opacity}>
+                    <defs>
+                      <clipPath id={`photoclip-${node.id}`}>
+                        <circle cx={node.x} cy={node.y} r={node.r} />
+                      </clipPath>
+                    </defs>
+                    <image href={person.photoUrl}
+                      x={node.x - node.r} y={node.y - node.r}
+                      width={node.r * 2} height={node.r * 2}
+                      clipPath={`url(#photoclip-${node.id})`}
+                      preserveAspectRatio="xMidYMid slice"
+                      style={{ filter: dead ? 'grayscale(0.5)' : 'none' }} />
+                    <circle cx={node.x} cy={node.y} r={node.r}
+                      fill="none" stroke={cc} strokeWidth={dead ? 1.5 : 2}
+                      strokeDasharray={dead ? '4,2' : undefined} />
                   </g>
-                )}
-                {!dead && person.gender === 'F' && (
-                  <circle cx={node.x} cy={node.y} r={node.r * 0.4}
-                    fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} pointerEvents="none" />
+                ) : (
+                  <>
+                    <circle cx={node.x} cy={node.y} r={node.r}
+                      fill={dead ? 'transparent' : cc}
+                      stroke={dead ? cc : 'none'}
+                      strokeWidth={dead ? 1.5 : 0}
+                      strokeDasharray={dead ? '4,2' : undefined}
+                      opacity={opacity} pointerEvents="none" />
+                    {dead && (
+                      <g pointerEvents="none" opacity={opacity * 0.6}>
+                        <line x1={node.x - node.r * 0.35} y1={node.y - node.r * 0.35}
+                          x2={node.x + node.r * 0.35} y2={node.y + node.r * 0.35}
+                          stroke={cc} strokeWidth={1.5} />
+                        <line x1={node.x + node.r * 0.35} y1={node.y - node.r * 0.35}
+                          x2={node.x - node.r * 0.35} y2={node.y + node.r * 0.35}
+                          stroke={cc} strokeWidth={1.5} />
+                      </g>
+                    )}
+                    {!dead && person.gender === 'F' && (
+                      <circle cx={node.x} cy={node.y} r={node.r * 0.4}
+                        fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} pointerEvents="none" />
+                    )}
+                  </>
                 )}
                 {!person.verified && (
                   <circle cx={node.x + node.r - 2} cy={node.y - node.r + 2}

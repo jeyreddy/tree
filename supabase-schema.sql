@@ -128,3 +128,17 @@ create index idx_persons_parent on persons(parent_id);
 -- ALTER TABLE families ADD COLUMN IF NOT EXISTS language text DEFAULT 'english';
 -- ALTER TABLE persons ADD COLUMN IF NOT EXISTS photo_url text;
 -- ALTER TABLE referrals ADD COLUMN IF NOT EXISTS topic text;
+
+-- ── Migration 2026-07-03: person photos (Supabase Storage) ──
+-- Creates the public "photos" bucket (2MB cap, image types only) + open-access
+-- policies matching the app's public read/write model. Run in the SQL Editor:
+-- insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+-- values ('photos', 'photos', true, 2097152, array['image/jpeg','image/png','image/webp'])
+-- on conflict (id) do update set public = true, file_size_limit = 2097152,
+--   allowed_mime_types = array['image/jpeg','image/png','image/webp'];
+-- drop policy if exists "Public read photos"   on storage.objects;
+-- drop policy if exists "Public upload photos" on storage.objects;
+-- drop policy if exists "Public update photos" on storage.objects;
+-- create policy "Public read photos"   on storage.objects for select using (bucket_id = 'photos');
+-- create policy "Public upload photos" on storage.objects for insert with check (bucket_id = 'photos');
+-- create policy "Public update photos" on storage.objects for update using (bucket_id = 'photos');

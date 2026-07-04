@@ -44,6 +44,16 @@ export const db = {
     if (error) reportDbError('update family', error)
   },
 
+  // Uploads a compressed photo to the public "photos" bucket at {familyId}/{personId}.{ext},
+  // overwriting any existing one. Returns a cache-busted public URL, or null on failure.
+  async uploadPhoto(familyId, personId, ext, blob) {
+    const path = `${familyId}/${personId}.${ext}`
+    const { error } = await supabase.storage.from('photos').upload(path, blob, { upsert: true, contentType: blob.type || 'image/jpeg' })
+    if (error) { reportDbError('upload photo', error); return null }
+    const { data } = supabase.storage.from('photos').getPublicUrl(path)
+    return `${data.publicUrl}?t=${Date.now()}`
+  },
+
   async getReferrals(familyId) {
     const { data, error } = await supabase.from('referrals').select('*').eq('family_id', familyId)
     if (error) reportDbError('load referrals', error)

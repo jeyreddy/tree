@@ -141,10 +141,18 @@ export default function App() {
 
   const savePerson = async (form) => {
     form = normalizePerson(form)
+    // Resolve the id up front (edit keeps it, add generates it) so the photo can be
+    // uploaded to {family}/{id} before the row is written. Upload failure is non-fatal:
+    // the rest of the form still saves so the user never loses their edits.
+    const personId = mode?.type === 'edit' ? form.id : makeId(form.name)
+    if (form.photoBlob) {
+      const url = await db.uploadPhoto(fam.id, personId, form.photoExt || 'jpg', form.photoBlob)
+      if (url) form.photoUrl = url
+    }
     if (mode?.type === 'add') {
       form.addedBy = userName || 'Anonymous'
       form.lastEditedBy = userName || 'Anonymous'
-      const id = makeId(form.name)
+      const id = personId
       const dir = mode.dir
       const targetId = mode.parentId
 
@@ -624,6 +632,7 @@ function PersonToRow(p, familyId) {
     notes: p.notes || '', verified: p.verified || false, sort_order: p.sortOrder || 0,
     added_by: p.addedBy || '', last_edited_by: p.lastEditedBy || '',
     birth_year: p.birthYear || null, death_year: p.deathYear || null,
+    photo_url: p.photoUrl || null,
   }
 }
 
@@ -639,6 +648,7 @@ function RowToPerson(r) {
     verified: r.verified, sortOrder: r.sort_order,
     addedBy: r.added_by || '', lastEditedBy: r.last_edited_by || '',
     birthYear: r.birth_year || null, deathYear: r.death_year || null,
+    photoUrl: r.photo_url || null,
     updated_at: r.updated_at, created_at: r.created_at,
   }
 }
