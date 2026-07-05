@@ -6,6 +6,8 @@ import { ReferralSection } from './ReferralSection'
 export function DetailPopup({ person, position, persons, REL, onClose, onEdit, onAdd, onDelete, onVerify, onFocus, onForceDelete, familyId, userName, referrals = [], setReferrals, views = [], disputes = [], historianName = '', onAddDispute, onResolveDispute, onAutoView, fam = null, focusId = null }) {
   useEffect(() => { if (onAutoView && person?.id) onAutoView(person.id) }, [person?.id])
   const spouse = person.spouseId ? persons.find(p => p.id === person.spouseId) : null
+  const parent = person.parentId ? persons.find(p => p.id === person.parentId) : null
+  const parentSpouse = parent?.spouseId ? persons.find(p => p.id === parent.spouseId) : null
   const dead = person.status === 'deceased'
   const popupW = 300, popupH = 580
   let left = position.x + 12
@@ -148,11 +150,20 @@ export function DetailPopup({ person, position, persons, REL, onClose, onEdit, o
 
         <div style={{ fontSize: 10, color: '#bbb', marginBottom: 5, fontWeight: 500, letterSpacing: 0.5 }}>{(REL?.addFamily || 'ADD FAMILY').toUpperCase()}</div>
         {!person.parentId ? (
+          // No parent yet — add either as a new ancestor above this person
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 4 }}>
             <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'M')}>↑ {REL?.father || 'Father'}</button>
             <button className="btn btn-gold btn-sm" onClick={() => onAdd('ancestor', 'F')}>↑ {REL?.mother || 'Mother'}</button>
           </div>
+        ) : !parentSpouse ? (
+          // One parent exists but their couple is incomplete — add the missing partner
+          // as that parent's spouse (married-in: bidirectional spouse_id, no parent_id).
+          <button className="btn btn-gold btn-sm btn-full" style={{ marginBottom: 4 }}
+            onClick={() => onAdd('spouse', parent.gender === 'F' ? 'M' : 'F', parent.id)}>
+            ↑ {parent.gender === 'F' ? (REL?.father || 'Father') : (REL?.mother || 'Mother')}
+          </button>
         ) : (
+          // Both parents present — couple complete
           <div style={{ fontSize: 10, color: '#bbb', marginBottom: 4 }}>
             To add grandparents, open their parent's own record and add Father/Mother there.
           </div>

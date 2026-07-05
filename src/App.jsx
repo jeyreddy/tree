@@ -505,7 +505,7 @@ export default function App() {
               REL={REL}
               onClose={() => setContextMenu(null)}
               onEdit={() => { const id = contextMenu.person.id; setContextMenu(null); openEdit(id) }}
-              onAdd={(dir, gender) => { const pid = contextMenu.person.id; setContextMenu(null); openAdd(pid, dir, gender) }}
+              onAdd={(dir, gender, targetId) => { const pid = targetId || contextMenu.person.id; setContextMenu(null); openAdd(pid, dir, gender) }}
               onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
               onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
               onFocus={id => { setSel(id); setContextMenu(null) }}
