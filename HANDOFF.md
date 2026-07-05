@@ -6,7 +6,7 @@
 **Local dev:** `C:\Tree` → `npm run dev` → http://localhost:5173
 **Live:** Vercel, auto-deploys from `main` on every push
 **Database:** Supabase (Postgres) — credentials in `.env`
-**Current HEAD:** `5384ee3` (family_units refactor)
+**Current HEAD:** `db21993` (delete family from HomeScreen)
 
 > Phase 0, 1, and 2 are COMPLETE. All 10 build tasks done. Ready for POC recruitment.
 
@@ -64,7 +64,7 @@ scripts/
 | 8 | Events timeline | 8278457 |
 | 9 | Historian dashboard (gap nudges, referral stats, weekly pulse) | 4c66a66 |
 | — | Phase 2 complete marker | a6ac64c |
-| — | Delete family from HomeScreen | (after a6ac64c) |
+| — | Delete family from HomeScreen | db21993 |
 
 ### Live data
 - Yeturu family: 24 persons, 8 family_units, 0 referrals, 0 photos
