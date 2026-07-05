@@ -44,6 +44,21 @@ export const db = {
     if (error) reportDbError('update family', error)
   },
 
+  // Hard-deletes a family and everything under it. Order respects foreign keys.
+  // persons<->family_units is a mutual FK, so we detach persons from their birth
+  // units first to break the cycle before deleting units then persons.
+  async deleteFamily(familyId) {
+    const { error: detachErr } = await supabase.from('persons').update({ birth_family_unit_id: null }).eq('family_id', familyId)
+    if (detachErr) { reportDbError('detach persons from units', detachErr); return false }
+    for (const table of ['referrals', 'person_views', 'disputes', 'family_units', 'persons']) {
+      const { error } = await supabase.from(table).delete().eq('family_id', familyId)
+      if (error) { reportDbError(`delete ${table}`, error); return false }
+    }
+    const { error } = await supabase.from('families').delete().eq('id', familyId)
+    if (error) { reportDbError('delete family', error); return false }
+    return true
+  },
+
   // ── Family units (the couple/single-parent entity — source of truth for kinship) ──
   async getFamilyUnits(familyId) {
     const { data, error } = await supabase.from('family_units').select('*').eq('family_id', familyId)

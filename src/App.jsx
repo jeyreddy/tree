@@ -318,7 +318,12 @@ export default function App() {
   if (screen === 'loading') return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#999' }}>Loading…</div>
   if (screen === 'home') return (
     <>
-      <HomeScreen families={families} onStartCreate={(name) => setOnboarding({ familyName: name.trim() })} onSelect={openFamily} />
+      <HomeScreen
+        families={families}
+        onStartCreate={(name) => setOnboarding({ familyName: name.trim() })}
+        onSelect={openFamily}
+        onDelete={async (familyId) => { const ok = await db.deleteFamily(familyId); if (ok) setFamilies(await db.getFamilies()) }}
+      />
       {onboarding && (
         <OnboardingFlow
           familyName={onboarding.familyName}
@@ -641,8 +646,14 @@ export default function App() {
 }
 
 // ── HOME SCREEN ──
-function HomeScreen({ families, onStartCreate, onSelect }) {
+function HomeScreen({ families, onStartCreate, onSelect, onDelete }) {
   const [newName, setNewName] = useState('')
+  const handleDelete = async (f) => {
+    const typed = window.prompt(`Delete "${f.name}" and all its data? This cannot be undone.\n\nType the family name to confirm:`)
+    if (typed === null) return
+    if (typed.trim() !== f.name) { alert('Name did not match — nothing was deleted.'); return }
+    await onDelete(f.id)
+  }
   return (
     <div className="home">
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
@@ -663,7 +674,14 @@ function HomeScreen({ families, onStartCreate, onSelect }) {
         <div key={f.id} className="card card-clickable" onClick={() => onSelect(f)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 16, fontWeight: 600 }}>{f.name}</div>
-            <div style={{ fontSize: 22, color: '#ddd' }}>→</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <span
+                onClick={(e) => { e.stopPropagation(); handleDelete(f) }}
+                title="Delete family"
+                style={{ fontSize: 13, opacity: 0.35, cursor: 'pointer', lineHeight: 1 }}
+              >🗑</span>
+              <div style={{ fontSize: 22, color: '#ddd' }}>→</div>
+            </div>
           </div>
         </div>
       ))}
