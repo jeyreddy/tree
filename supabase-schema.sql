@@ -142,3 +142,25 @@ create index idx_persons_parent on persons(parent_id);
 -- create policy "Public read photos"   on storage.objects for select using (bucket_id = 'photos');
 -- create policy "Public upload photos" on storage.objects for insert with check (bucket_id = 'photos');
 -- create policy "Public update photos" on storage.objects for update using (bucket_id = 'photos');
+
+-- ── Migration 2026-07-05: family_unit as a first-class entity ──
+-- A couple (or single parent) becomes its own record; children point to their
+-- birth family_unit instead of to one parent. parent_id / spouse_id are KEPT
+-- (dual-write off) so we can revert; they are dropped in a later migration only
+-- after this model is verified in production. Run in the Supabase SQL Editor:
+-- CREATE TABLE family_units (
+--   id text PRIMARY KEY,
+--   family_id text REFERENCES families(id),
+--   partner_a_id text REFERENCES persons(id),   -- male / father slot
+--   partner_b_id text REFERENCES persons(id),   -- female / mother slot (null for a single parent)
+--   marriage_year integer,
+--   status text DEFAULT 'active',
+--   created_at timestamptz DEFAULT now()
+-- );
+-- ALTER TABLE family_units ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Public access" ON family_units FOR ALL USING (true) WITH CHECK (true);
+-- ALTER TABLE persons ADD COLUMN IF NOT EXISTS birth_family_unit_id text REFERENCES family_units(id);
+-- CREATE INDEX IF NOT EXISTS idx_persons_birth_unit ON persons(birth_family_unit_id);
+-- CREATE INDEX IF NOT EXISTS idx_family_units_family ON family_units(family_id);
+-- Then run the one-time data migration script (scripts/migrate-family-units.mjs).
+-- Future cleanup (only after verification): ALTER TABLE persons DROP COLUMN parent_id, DROP COLUMN spouse_id;

@@ -9,6 +9,7 @@ import PersonForm from './PersonForm'
 import StatsTab from './StatsTab'
 import { DetailPopup } from './DetailPopup'
 import OnboardingFlow from './OnboardingFlow'
+import { enrichPersons, makeUnitId, unitOfPartner } from './familyGraph'
 
 const LABELS = {
   telugu:  { father: 'తండ్రి',  mother: 'తల్లి',   husband: 'భర్త',     wife: 'భార్య',    son: 'కొడుకు',  daughter: 'కూతురు',  children: 'పిల్లలు',      gotra: 'గోత్రం',     languages: 'భాషలు',     addFamily: 'కుటుంబం జోడించు' },
@@ -45,6 +46,7 @@ export default function App() {
   const [families, setFamilies] = useState([])
   const [fam, setFam] = useState(null)
   const [persons, setPersons] = useState([])
+  const [familyUnits, setFamilyUnits] = useState([])
   const [sel, setSel] = useState(null)
   const [mode, setMode] = useState(null)
   const [search, setSearch] = useState('')
@@ -77,10 +79,11 @@ export default function App() {
   }, [])
 
   const openFamily = async (f) => {
-    const [rows, refs, vws, disps] = await Promise.all([db.getPersons(f.id), db.getReferrals(f.id), db.getViews(f.id), db.getDisputes(f.id)])
+    const [rows, units, refs, vws, disps] = await Promise.all([db.getPersons(f.id), db.getFamilyUnits(f.id), db.getReferrals(f.id), db.getViews(f.id), db.getDisputes(f.id)])
     const mapped = rows.map(RowToPerson)
     const normalized = mapped.map(normalizePerson)
-    setPersons(normalized)
+    setFamilyUnits(units)
+    setPersons(enrichPersons(normalized, units))
     setReferrals(refs)
     setViews(vws)
     setDisputes(disps)
@@ -111,16 +114,16 @@ export default function App() {
     const femaleId = makeId(female.name)
     const malePerson = normalizePerson({
       id: maleId, name: male.name, clan: male.clan, gender: 'M', status: 'alive',
-      generation: 0, parentId: null, spouseId: femaleId, sortOrder: 0,
-      addedBy: historian, lastEditedBy: historian,
+      generation: 0, sortOrder: 0, addedBy: historian, lastEditedBy: historian,
     })
     const femalePerson = normalizePerson({
       id: femaleId, name: female.name, clan: female.clan, gender: 'F', status: 'alive',
-      generation: 0, parentId: null, spouseId: maleId, sortOrder: 0,
-      addedBy: historian, lastEditedBy: historian,
+      generation: 0, sortOrder: 0, addedBy: historian, lastEditedBy: historian,
     })
     await db.upsertPerson(PersonToRow(malePerson, famId))
     await db.upsertPerson(PersonToRow(femalePerson, famId))
+    // The founding couple is a family_unit, not a spouse_id link.
+    await db.createFamilyUnit({ id: makeUnitId(), family_id: famId, partner_a_id: maleId, partner_b_id: femaleId, marriage_year: null, status: 'active' })
 
     const f = { id: famId, name: familyName.trim(), historian, historian_name: historian }
     setFamilies(prev => [f, ...prev])
@@ -131,8 +134,9 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     if (!fam) return
-    const rows = await db.getPersons(fam.id)
-    setPersons(rows.map(RowToPerson))
+    const [rows, units] = await Promise.all([db.getPersons(fam.id), db.getFamilyUnits(fam.id)])
+    setFamilyUnits(units)
+    setPersons(enrichPersons(rows.map(RowToPerson).map(normalizePerson), units))
   }, [fam])
 
   const getKids = (id) => persons.filter(p => p.parentId === id).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
@@ -158,15 +162,26 @@ export default function App() {
       const targetId = mode.parentId
 
       if (dir === 'spouse' && targetId) {
-        form.spouseId = targetId
+        // New spouse → create the person, then a family_unit linking the two (male=A, female=B).
+        const target = persons.find(p => p.id === targetId)
         await db.upsertPerson(PersonToRow({ ...form, id }, fam.id))
-        await db.updatePerson(targetId, { spouse_id: id })
+        const maleId = form.gender === 'M' ? id : (target?.gender === 'M' ? target.id : id)
+        const femaleId = maleId === id ? targetId : id
+        await db.createFamilyUnit({ id: makeUnitId(), family_id: fam.id, partner_a_id: maleId, partner_b_id: femaleId, marriage_year: null, status: 'active' })
       } else if (dir === 'ancestor' && targetId) {
+        // Add Father / Mother → new parent person placed in the target's birth-unit slot
+        // (father = partner_a, mother = partner_b). Creates the birth unit if none exists.
         const target = persons.find(p => p.id === targetId)
         form.generation = target.generation - 1
-        form.parentId = target.parentId || null
         await db.upsertPerson(PersonToRow({ ...form, id }, fam.id))
-        await db.updatePerson(targetId, { parent_id: id })
+        const slot = form.gender === 'M' ? 'partner_a_id' : 'partner_b_id'
+        if (target.birthUnitId) {
+          await db.updateFamilyUnit(target.birthUnitId, { [slot]: id })
+        } else {
+          const unitId = makeUnitId()
+          await db.createFamilyUnit({ id: unitId, family_id: fam.id, partner_a_id: form.gender === 'M' ? id : null, partner_b_id: form.gender === 'F' ? id : null, marriage_year: null, status: 'active' })
+          await db.updatePerson(targetId, { birth_family_unit_id: unitId })
+        }
         const minGen = Math.min(...persons.map(p => p.generation), form.generation)
         if (minGen < 0) {
           for (const p of persons) {
@@ -175,18 +190,23 @@ export default function App() {
           await db.updatePerson(id, { generation: form.generation + Math.abs(minGen) })
         }
       } else {
+        // Add Child → child's birth unit is the target's couple (or a new single-parent unit).
         const clickTarget = persons.find(p => p.id === targetId)
+        let unitId = null
         if (clickTarget) {
-          const clickSpouse = clickTarget.spouseId ? persons.find(p => p.id === clickTarget.spouseId) : null
-          const bloodFather = clickTarget.gender === 'M' ? clickTarget : (clickSpouse?.gender === 'M' ? clickSpouse : clickTarget)
-          form.parentId = bloodFather.id
+          const existing = unitOfPartner(clickTarget.id, familyUnits)
+          if (existing) unitId = existing.id
+          else {
+            unitId = makeUnitId()
+            await db.createFamilyUnit({ id: unitId, family_id: fam.id, partner_a_id: clickTarget.gender === 'M' ? clickTarget.id : null, partner_b_id: clickTarget.gender === 'F' ? clickTarget.id : null, marriage_year: null, status: 'active' })
+          }
         }
-        const sibs = persons.filter(p => p.parentId === form.parentId)
-        form.sortOrder = sibs.length
+        form.birth_family_unit_id = unitId
+        form.sortOrder = unitId ? persons.filter(p => p.birthUnitId === unitId).length : 0
         await db.upsertPerson(PersonToRow({ ...form, id }, fam.id))
       }
       setSel(id)
-      setExpanded(prev => { const n = new Set(prev); if (form.parentId) n.add(form.parentId); n.add(id); return n })
+      setExpanded(prev => { const n = new Set(prev); if (targetId) n.add(targetId); n.add(id); return n })
     } else if (mode?.type === 'edit') {
       form.lastEditedBy = userName || 'Anonymous'
       await db.upsertPerson(PersonToRow(form, fam.id))
@@ -199,8 +219,13 @@ export default function App() {
   const openEdit = (id) => setMode({ type: 'edit', id })
   const openAdd = (id, dir, gender) => setMode({ type: 'add', dir, parentId: id, gender })
 
+  // Children of a person = children of any unit they partner in (both partners' kids).
+  const childrenOfPerson = (personId) => {
+    const unitIds = familyUnits.filter(u => u.partner_a_id === personId || u.partner_b_id === personId).map(u => u.id)
+    return unitIds.length ? persons.filter(p => unitIds.includes(p.birthUnitId)) : []
+  }
   const isDescendant = (ancestorId, candidateId) => {
-    const kids = persons.filter(p => p.parentId === ancestorId)
+    const kids = childrenOfPerson(ancestorId)
     return kids.some(k => k.id === candidateId || isDescendant(k.id, candidateId))
   }
 
@@ -218,8 +243,9 @@ export default function App() {
         return
       }
       if (!window.confirm(`Connect ${dragged.name} and ${target.name} as spouses?`)) return
-      await db.updatePerson(dragged.id, { spouse_id: target.id })
-      await db.updatePerson(target.id, { spouse_id: dragged.id })
+      const maleId = dragged.gender === 'M' ? dragged.id : (target.gender === 'M' ? target.id : dragged.id)
+      const femaleId = maleId === dragged.id ? target.id : dragged.id
+      await db.createFamilyUnit({ id: makeUnitId(), family_id: fam.id, partner_a_id: maleId, partner_b_id: femaleId, marriage_year: null, status: 'active' })
     } else if (mode === 'child') {
       if (dragged.spouseId === target.id || target.spouseId === dragged.id) {
         alert(`${dragged.name} and ${target.name} are already linked as spouses — one can't also be the other's child.`)
@@ -229,20 +255,36 @@ export default function App() {
         alert(`Can't do that — ${target.name} is already a descendant of ${dragged.name}, so this would create a loop.`)
         return
       }
-      if (target.id === dragged.parentId) return
-      const targetSpouse = target.spouseId ? persons.find(p => p.id === target.spouseId) : null
-      const bloodParent = target.gender === 'M' ? target : (targetSpouse?.gender === 'M' ? targetSpouse : target)
-      const replacing = dragged.parentId ? ` (replacing their current parent)` : ''
-      if (!window.confirm(`Make ${dragged.name} a child of ${bloodParent.name}${replacing}?`)) return
-      await db.updatePerson(dragged.id, { parent_id: bloodParent.id })
+      const existing = unitOfPartner(target.id, familyUnits)
+      if (existing && existing.id === dragged.birthUnitId) return  // already a child of this couple
+      const replacing = dragged.birthUnitId ? ` (replacing their current parents)` : ''
+      if (!window.confirm(`Make ${dragged.name} a child of ${target.name}${replacing}?`)) return
+      let unitId = existing?.id
+      if (!unitId) {
+        unitId = makeUnitId()
+        await db.createFamilyUnit({ id: unitId, family_id: fam.id, partner_a_id: target.gender === 'M' ? target.id : null, partner_b_id: target.gender === 'F' ? target.id : null, marriage_year: null, status: 'active' })
+      }
+      await db.updatePerson(dragged.id, { birth_family_unit_id: unitId })
     }
     await refresh()
   }
 
   const deletePerson = async (id) => {
-    if (getKids(id).length > 0) return alert('Move or delete children first')
     const p = persons.find(x => x.id === id)
-    if (p?.spouseId) await db.updatePerson(p.spouseId, { spouse_id: null })
+    if (!p) return
+    const myUnits = familyUnits.filter(u => u.partner_a_id === id || u.partner_b_id === id)
+    // Blocked only if deleting would leave a childful unit with no parent (they're the sole partner)
+    const orphaning = myUnits.some(u => {
+      const other = u.partner_a_id === id ? u.partner_b_id : u.partner_a_id
+      return !other && persons.some(x => x.birthUnitId === u.id)
+    })
+    if (orphaning) return alert('Move or delete their children first')
+    for (const u of myUnits) {
+      const other = u.partner_a_id === id ? u.partner_b_id : u.partner_a_id
+      const hasChildren = persons.some(x => x.birthUnitId === u.id)
+      if (!other && !hasChildren) await db.deleteFamilyUnit(u.id)
+      else await db.updateFamilyUnit(u.id, { [u.partner_a_id === id ? 'partner_a_id' : 'partner_b_id']: null })
+    }
     await db.deletePerson(id)
     setSel(null)
     await refresh()
@@ -264,7 +306,7 @@ export default function App() {
   const moveSib = async (id, dir) => {
     const p = persons.find(x => x.id === id)
     if (!p) return
-    const sibs = persons.filter(x => x.parentId === p.parentId).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+    const sibs = persons.filter(x => x.birthUnitId && x.birthUnitId === p.birthUnitId).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
     const idx = sibs.findIndex(x => x.id === id)
     const si = idx + dir
     if (si < 0 || si >= sibs.length) return
@@ -505,7 +547,7 @@ export default function App() {
               REL={REL}
               onClose={() => setContextMenu(null)}
               onEdit={() => { const id = contextMenu.person.id; setContextMenu(null); openEdit(id) }}
-              onAdd={(dir, gender, targetId) => { const pid = targetId || contextMenu.person.id; setContextMenu(null); openAdd(pid, dir, gender) }}
+              onAdd={(dir, gender) => { const pid = contextMenu.person.id; setContextMenu(null); openAdd(pid, dir, gender) }}
               onDelete={() => { const id = contextMenu.person.id; setContextMenu(null); deletePerson(id) }}
               onVerify={() => { const id = contextMenu.person.id; setContextMenu(null); toggleVerified(id) }}
               onFocus={id => { setSel(id); setContextMenu(null) }}
@@ -535,11 +577,18 @@ export default function App() {
               onForceDelete={async () => {
                 const id = contextMenu.person.id
                 setContextMenu(null)
-                for (const p of persons) {
-                  if (p.spouseId === id) await db.updatePerson(p.id, { spouse_id: null })
-                }
-                for (const p of persons) {
-                  if (p.parentId === id) await db.updatePerson(p.id, { parent_id: null })
+                const myUnits = familyUnits.filter(u => u.partner_a_id === id || u.partner_b_id === id)
+                for (const u of myUnits) {
+                  const other = u.partner_a_id === id ? u.partner_b_id : u.partner_a_id
+                  if (!other) {
+                    // Sole partner → the unit dies; detach its children.
+                    for (const child of persons.filter(x => x.birthUnitId === u.id)) {
+                      await db.updatePerson(child.id, { birth_family_unit_id: null })
+                    }
+                    await db.deleteFamilyUnit(u.id)
+                  } else {
+                    await db.updateFamilyUnit(u.id, { [u.partner_a_id === id ? 'partner_a_id' : 'partner_b_id']: null })
+                  }
                 }
                 await db.deletePerson(id)
                 await refresh()
@@ -634,7 +683,9 @@ function PersonToRow(p, familyId) {
   return {
     id: p.id, family_id: familyId, name: p.name || '', clan: p.clan || '',
     gender: p.gender || 'M', status: p.status || 'alive', generation: p.generation || 0,
-    parent_id: p.parentId || null, spouse_id: p.spouseId || null,
+    // parent_id / spouse_id are no longer written — kinship lives in family_units.
+    // They remain in the DB (populated by old rows) purely as a revert path.
+    birth_family_unit_id: p.birth_family_unit_id || null,
     location: p.location || '', native_place: p.nativePlace || '',
     gotra: p.gotra || '', languages: p.languages || [],
     occupation: p.occupation || { role: '', company: '' }, education: p.education || [],
@@ -650,7 +701,7 @@ function PersonToRow(p, familyId) {
 function RowToPerson(r) {
   return {
     id: r.id, name: r.name, clan: r.clan, gender: r.gender, status: r.status,
-    generation: r.generation, parentId: r.parent_id, spouseId: r.spouse_id,
+    generation: r.generation, birth_family_unit_id: r.birth_family_unit_id || null,
     location: r.location, nativePlace: r.native_place, gotra: r.gotra,
     languages: r.languages || [], occupation: r.occupation || { role: '', company: '' },
     education: r.education || [],

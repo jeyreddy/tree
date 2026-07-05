@@ -44,6 +44,28 @@ export const db = {
     if (error) reportDbError('update family', error)
   },
 
+  // ── Family units (the couple/single-parent entity — source of truth for kinship) ──
+  async getFamilyUnits(familyId) {
+    const { data, error } = await supabase.from('family_units').select('*').eq('family_id', familyId)
+    if (error) reportDbError('load family units', error)
+    return data || []
+  },
+
+  async createFamilyUnit(unit) {
+    const { error } = await supabase.from('family_units').insert(unit)
+    if (error) reportDbError('create family unit', error)
+  },
+
+  async updateFamilyUnit(id, changes) {
+    const { error } = await supabase.from('family_units').update(changes).eq('id', id)
+    if (error) reportDbError('update family unit', error)
+  },
+
+  async deleteFamilyUnit(id) {
+    const { error } = await supabase.from('family_units').delete().eq('id', id)
+    if (error) reportDbError('delete family unit', error)
+  },
+
   // Uploads a compressed photo to the public "photos" bucket at {familyId}/{personId}.{ext},
   // overwriting any existing one. Returns a cache-busted public URL, or null on failure.
   async uploadPhoto(familyId, personId, ext, blob) {
